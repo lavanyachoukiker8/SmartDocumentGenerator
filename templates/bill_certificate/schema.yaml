@@ -1,0 +1,119 @@
+placeholders:
+- key: approval_note_no
+  label: Approval Note No.
+  type: text
+  required: true
+  never_ai: true
+  masked: false
+  question: Official approval note reference
+  section: Approval
+- key: approval_date
+  label: Approval Date
+  type: date
+  required: true
+  never_ai: true
+  masked: false
+  question: Date of approval note
+  section: Approval
+- key: head_of_account
+  label: Head of Account
+  type: text
+  required: true
+  never_ai: true
+  masked: false
+  question: Budget head code (e.g. 6/52)
+  section: Approval
+- key: event_title
+  label: Event Title
+  type: text
+  required: true
+  never_ai: false
+  masked: false
+  shared: true
+  question: Event title
+  section: Event Details
+- key: items
+  label: Purchased Items
+  type: table
+  required: true
+  never_ai: false
+  masked: false
+  question: Bill items and quantities
+  section: Items & Bills
+  columns:
+  - key: name
+    label: Item Name
+    type: text
+  - key: qty
+    label: Qty
+    type: number
+  - key: unit_cost
+    label: Unit Cost
+    type: number
+  - key: total
+    label: Total
+    type: number
+- key: supplier_name
+  label: Supplier Name
+  type: text
+  required: true
+  never_ai: false
+  masked: false
+  question: Name of vendor or supplier
+  section: Vendor Details
+- key: supplier_gst
+  label: Supplier GST
+  type: text
+  required: false
+  never_ai: true
+  masked: true
+  question: Vendor GST Number
+  section: Vendor Details
+- key: invoice_no
+  label: Invoice No.
+  type: text
+  required: true
+  never_ai: true
+  masked: false
+  question: Vendor bill or invoice number
+  section: Vendor Details
+- key: invoice_date
+  label: Invoice Date
+  type: date
+  required: true
+  never_ai: true
+  masked: false
+  question: Date on the invoice
+  section: Vendor Details
+- key: account_number
+  label: Bank Account Number
+  type: text
+  required: true
+  never_ai: true
+  masked: true
+  question: Bank account number for payment
+  section: Bank Details
+- key: bank_name
+  label: Bank Name
+  type: text
+  required: true
+  never_ai: false
+  masked: false
+  question: Name of payee bank
+  section: Bank Details
+- key: bank_branch
+  label: Bank Branch
+  type: text
+  required: false
+  never_ai: false
+  masked: false
+  question: Bank branch name
+  section: Bank Details
+- key: ifsc
+  label: IFSC Code
+  type: text
+  required: true
+  never_ai: true
+  masked: true
+  question: Bank IFSC Code
+  section: Bank Details

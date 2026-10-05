@@ -1,0 +1,5 @@
+rules:
+- id: rule-room-needed
+  description: Recommended whenever a physical venue (hall, lab) is requested and
+    event is not purely online.
+  condition: venue != None and mode != 'Online'

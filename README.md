@@ -1,101 +1,155 @@
 # ClubDocs — Smart Document Generator for College Clubs
 
-Frontend for **ClubDocs**, built for student clubs and chapters (first user: **ACM Student Chapter at SVNIT Surat**).
-Built with **Next.js (App Router)**, **TypeScript**, **Tailwind CSS**, and **shadcn/ui**.
+**ClubDocs** is an intelligent, privacy-first document generation platform built for college clubs and student chapters. Its first deployment is for the **ACM Student Chapter at SVNIT Surat** (Sardar Vallabhbhai National Institute of Technology, Surat).
 
-Branded with ACM Blue (`#4F81BD` primary, `#1F3A5F` dark, white background), serif headings for document letterhead previews, and sans-serif interface controls.
-
----
-
-## Features & Pages
-
-1. **Dashboard (`/`)**:
-   - Recent events with status chips (`Draft`, `Needs info`, `Ready`, `Approved`).
-   - Counts of generated documents, hours saved, and attention alerts.
-   - Quick links to Templates Catalog and Club Settings.
-   - Demo database reset button.
-
-2. **New Request (`/new`)**:
-   - **"Describe it"**: Natural language input (e.g., *"We are conducting a two-day Web Development Workshop on 14–15 October in Seminar Hall for around 120 students"*).
-   - **"Fill a form"**: Structured form (title, category, dates, time, venue, mode, participants, description, objective, organizers).
-   - Submits directly to the extraction review page.
-
-3. **Extraction Review (`/event/[id]/review`)**:
-   - Split layout with field badges: `From your text`, `From club profile`, `AI draft - review`, and `Missing`.
-   - Amber **"Needs your input"** panel highlighting missing required fields with specific questions (e.g. *"Who is the faculty coordinator?"*).
-   - Hard privacy guard: Sensitive/official data (reference numbers, bank details, GST, mobile numbers, signatures) is **never** auto-filled; displayed with masked inputs and confirmed by the user.
-   - Recommended documents with reasoning (Room Permission Letter, Bill Certificate Form BC-R, Bill Summary).
-   - Generate options including *"Generate with placeholders"* (`[TO BE FILLED]`).
-
-4. **Document Editor (`/event/[id]/doc/[docId]`)**:
-   - Left side: Grouped field editor with table support (add/remove rows for items, reimbursements, and contacts).
-   - Right side: Live A4 letterhead preview with ACM & SVNIT Surat logos, blue headings, institute subtitle, and yellow highlights for unfilled fields.
-   - Toolbar: Save (creates new version), Download DOCX, Download PDF, Version history drawer with timestamp and restore, and *"Regenerate all documents from event"*.
-   - Notice when edits update shared fields across other documents.
-
-5. **Event Hub (`/event/[id]`)**:
-   - Overview of the event and list of all generated documents with status.
-   - **"Sync changes"** banner that appears whenever event data has been updated after document generation.
-
-6. **Templates Catalog (`/templates`)**:
-   - Grid of official templates (Room Permission Letter, Bill Certificate BC-R, Bill Summary).
-   - **Add Template Flow**: Upload `.docx` and optional `.yaml` schema; detects `{{placeholders}}` in the browser, lets you customize types, requirements, questions, sensitive/AI-draftable flags, and recommendation rules.
-
-7. **Club Settings (`/settings`)**:
-   - Letterhead branding (logos, primary/dark colors, letterhead titles).
-   - Signatories list (name, designation, role).
-   - Reference numbering patterns and auto-increment counters per category (`ACM/{FY}/ROOM/{seq}`).
-   - Academic and financial years.
-
-8. **History & Analytics (`/history`)**:
-   - Audit trail of generated documents with type and date filters.
-   - Stat cards summarizing turnarounds and approvals.
+ClubDocs turns freeform event requirements or structured forms into standardized, editable, branded college documents in **DOCX** and **PDF** formats using data-driven templates that the club can extend without writing code.
 
 ---
 
-## Getting Started
+## 🏛️ Core Principles & Hard Rules
 
-### 1. Install & Run
+- **R1: Never Fabricate Official Data:** Reference numbers, approval note numbers, bank account numbers, IFSC codes, GST numbers, invoice numbers, mobile numbers, and signatures must **NEVER** be invented, auto-filled, or hallucinated by AI or text extraction. The backend strictly enforces this via an `OFFICIAL_FORBIDDEN_KEYS` post-filter regardless of LLM or user text prompts. Missing official details are always flagged for human input.
+- **R2: Templates are Data, Never Code:** Templates live as a directory containing `template.docx`, `schema.yaml`, `rules.yaml`, and `meta.yaml`. Adding or customizing a document template is performed via file upload or filesystem directory creation without redeploying code.
+- **R3: Single Source of Truth:** A single `Event` object is the root truth. Shared fields (e.g. `event_title`, `dates`, `venue`, `faculty_coordinator`, `participants`, `mode`) stay synchronized across all documents for an event. Editing a shared field automatically updates all related documents and alerts the user.
+- **R4: Safe Rule Evaluation:** Document recommendations are evaluated dynamically using `simpleeval` with a strictly sandboxed namespace—`eval` and `exec` are banned.
+- **R5: Privacy & Field Masking:** Sensitive data (bank details, IFSC, GST, phone numbers) are encrypted at rest with Fernet (AES-256-GCM) and masked in the UI (`••••••••1234`) with password-style reveal toggles.
 
-```bash
-cd frontend
-npm install
-npm run dev
+---
+
+## 🏗️ System Architecture
+
+```
+┌────────────────────────────────────────────────────────┐
+│               Frontend: Next.js 16 (App Router)        │
+│  - TypeScript, Tailwind CSS, shadcn/ui                 │
+│  - Desktop-first responsive layout (ACM Blue letterhead)│
+│  - Dual Mode: Standalone Mock (v2) or Live FastAPI     │
+│  - Stepper: Describe -> Review -> Generate -> Edit     │
+└───────────────────────────┬────────────────────────────┘
+                            │ REST API (JSON / FormData)
+                            ▼
+┌────────────────────────────────────────────────────────┐
+│               Backend: FastAPI (Python 3.13)           │
+│  - Structured Extraction (Regex engine + Optional LLM) │
+│  - Hard Rule R1 Post-Filter Guard                      │
+│  - SQLModel + SQLite Database with Fernet Encryption   │
+│  - Template Loader & Safe Rule Evaluator (simpleeval)  │
+│  - Rendering Engine: docxtpl + LibreOffice Headless    │
+└───────────────────────────┬────────────────────────────┘
+                            │ Reads & Renders
+                            ▼
+┌────────────────────────────────────────────────────────┐
+│                 /templates/<template_id>/              │
+│  ├── template.docx (Word letterhead + Jinja2 syntax)   │
+│  ├── schema.yaml   (Placeholders, types, questions)    │
+│  ├── rules.yaml    (Recommendation conditions)         │
+│  └── meta.yaml     (Authority, description, ref code)  │
+└────────────────────────────────────────────────────────┘
 ```
 
+---
+
+## 📁 Starter Templates Included
+
+1. **Room Permission Letter (`room_permission`)**:
+   - Official letter addressed to the Head of Department (CSE Dept.) requesting classroom/seminar hall booking.
+   - Branded with SVNIT and ACM logos, schedule, event details table, and 4 contact blocks.
+2. **Bill Certificate (`bill_certificate`)**:
+   - Institute **Form BC-R** addressed to Dean (Student Welfare).
+   - Approval note details, itemized table (sr no, item name, qty, rate, total), GST/vendor details, indenter details.
+3. **Bill Summary (`bill_summary`)**:
+   - Event summary and expense reimbursement sheet with payment recipient details, account numbers, and signatories.
+
+---
+
+## 🚀 Running the Project
+
+### Option 1: Docker Compose (Recommended for Full Stack)
+
+To run both Next.js frontend, FastAPI backend, and LibreOffice PDF conversion in Docker:
+
+```bash
+docker compose up --build
+```
+
+- Frontend: [http://localhost:3000](http://localhost:3000)
+- Backend API & Swagger: [http://localhost:8000/docs](http://localhost:8000/docs)
+
+---
+
+### Option 2: Running Locally (FastAPI + Next.js)
+
+#### 1. Backend Setup (FastAPI)
+```bash
+# In repository root:
+python -m venv .venv
+
+# Activate virtual environment:
+# Windows:
+.venv\Scripts\activate
+# Linux/macOS:
+source .venv/bin/activate
+
+# Install dependencies
+pip install -r backend/requirements.txt
+
+# Run FastAPI backend
+uvicorn app.main:app --app-dir backend --reload --port 8000
+```
+Backend runs at `http://localhost:8000`. API documentation is available at `http://localhost:8000/docs`.
+
+#### 2. Frontend Setup (Next.js)
+```bash
+cd frontend
+
+# Install packages
+npm install
+
+# Configure environment (.env.local)
+# For Live Backend mode:
+echo "NEXT_PUBLIC_USE_MOCK=false" > .env.local
+echo "NEXT_PUBLIC_API_BASE_URL=http://localhost:8000" >> .env.local
+
+# For Standalone Mock mode (no backend required):
+# NEXT_PUBLIC_USE_MOCK=true
+
+# Start frontend
+npm run dev
+```
 Open [http://localhost:3000](http://localhost:3000) in your browser.
 
 ---
 
-## Connecting to a Real FastAPI Backend
+## 🧪 Running Verification & Tests
 
-Currently, the application runs entirely in client-side mock mode via typed handlers in `lib/mock/*` and localStorage persistence.
+### Backend Unit & Integration Tests (pytest)
+Runs 8 comprehensive tests covering health, Fernet encryption/decryption, safe rule evaluator, templates catalog, event lifecycle, document generation, Rule R1 enforcement, and database reset:
 
-The backend integration layer is strictly isolated to **`lib/api.ts`** and all data shapes are strictly defined in **`lib/types.ts`**.
+```bash
+# Windows
+.venv\Scripts\pytest -v
 
-### Steps to Swap Mock Data for FastAPI at `http://localhost:8000`:
+# Linux/macOS
+pytest -v
+```
 
-1. In `frontend/.env.local` (or create it), set:
-   ```env
-   NEXT_PUBLIC_USE_MOCK="false"
-   NEXT_PUBLIC_API_BASE_URL="http://localhost:8000"
-   ```
+### Frontend Build & Lint Verification
+```bash
+cd frontend
+npm run lint
+npm run build
+```
 
-2. Your FastAPI backend should implement the following REST endpoints matching `lib/types.ts`:
-   - `GET /api/club` & `PUT /api/club`
-   - `GET /api/events` & `GET /api/events/{id}`
-   - `POST /api/events/from-text` (body: `{ text: string }`)
-   - `POST /api/events/from-form` (body: `EventFormInput`)
-   - `PATCH /api/events/{id}/fields` (body: `{ updates: Record<string, FieldValue> }`)
-   - `GET /api/events/{id}/recommendations`
-   - `POST /api/events/{id}/generate` (body: `{ templateIds: string[], options: GenerateOptions }`)
-   - `POST /api/events/{id}/regenerate`
-   - `GET /api/documents` & `GET /api/documents/{id}`
-   - `PUT /api/documents/{id}` (body: `{ values: FieldValues, note: string }`)
-   - `PATCH /api/documents/{id}/status`
-   - `POST /api/documents/{id}/restore` (body: `{ version: number }`)
-   - `GET /api/documents/{id}/export?format={docx|pdf}` (returns binary file)
-   - `GET /api/templates` & `POST /api/templates` & `POST /api/templates/analyze`
-   - `GET /api/stats`
+---
 
-3. Because all components exclusively call functions imported from `@/lib/api`, **no UI components need to be modified** when switching to the live backend.
+## 🔒 Security & Data Masking
+
+- **Masked Fields:** Bank Account Number, IFSC Code, GST Number, Mobile Number are flagged `neverAI: true` and `masked: true`. They are encrypted using Fernet (AES-256) at rest and displayed as `••••••••1234` in the UI with a reveal button.
+- **Official Fields:** Reference Numbers, Approval Note Numbers, Purchase Orders, and Invoices are flagged `neverAI: true` and `masked: false`. They are official records that can never be guessed by AI, but do not require masking.
+- **Reference Numbers:** Reference numbers are peeked via `GET /api/club/reference/{category}/peek` without burning counters. The sequential counter only increments when generating or approving the document.
+
+---
+
+## 📖 Adding New Templates
+
+See [`docs/TEMPLATES.md`](file:///c:/Users/OMEN/Desktop/SmartDocumentGenerator/docs/TEMPLATES.md) for detailed instructions on authoring and managing templates using `.docx` files, Jinja2 placeholders, `schema.yaml`, and `rules.yaml`.

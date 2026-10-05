@@ -1,0 +1,30 @@
+version: "3.8"
+
+services:
+  backend:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    ports:
+      - "8000:8000"
+    environment:
+      - FERNET_KEY=uXl_g4T0jL-vX9yD0w7uQk8M2bA6cD4eF8hJ0lP2rT4=
+      - LIBREOFFICE_PATH=soffice
+    volumes:
+      - ./templates:/app/templates
+      - ./backend/data:/app/backend/data
+      - ./backend/outputs:/app/backend/outputs
+    restart: unless-stopped
+
+  frontend:
+    build:
+      context: .
+      dockerfile: frontend/Dockerfile
+    ports:
+      - "3000:3000"
+    environment:
+      - NEXT_PUBLIC_USE_MOCK=false
+      - NEXT_PUBLIC_API_BASE_URL=http://backend:8000
+    depends_on:
+      - backend
+    restart: unless-stopped

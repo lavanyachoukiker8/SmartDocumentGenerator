@@ -1,0 +1,5 @@
+rules:
+- id: rule-prizes-needed
+  description: Recommended when events involve cash awards, prize money, or individual
+    reimbursements.
+  condition: hasPrizes == True

@@ -1,0 +1,9 @@
+id: room-permission
+name: Room Permission Letter
+short_name: Room Permission
+description: Standard letter on official ACM letterhead requesting classroom, lab,
+  or seminar hall booking from HoD.
+authority: HoD (CSE Dept.)
+ref_category: ROOM
+file_name: room_permission.docx
+version: 1

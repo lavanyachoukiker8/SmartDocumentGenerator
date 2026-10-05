@@ -1,0 +1,41 @@
+placeholders:
+- key: event_title
+  label: Event Title
+  type: text
+  required: true
+  never_ai: false
+  masked: false
+  shared: true
+  question: Event title
+  section: Event Details
+- key: summary_date
+  label: Summary Date
+  type: date
+  required: true
+  never_ai: false
+  masked: false
+  question: Date of summary sheet
+  section: Header
+- key: reimbursements
+  label: Reimbursements Table
+  type: table
+  required: true
+  never_ai: false
+  masked: false
+  question: Recipient names, bank details, and reimbursement amounts
+  section: Distribution
+  columns:
+  - key: name
+    label: Team / Entity
+    type: text
+  - key: paid_to
+    label: Paid To
+    type: text
+  - key: account
+    label: Account
+    type: text
+    never_ai: true
+    masked: true
+  - key: amount
+    label: Amount
+    type: number

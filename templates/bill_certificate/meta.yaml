@@ -1,0 +1,9 @@
+id: bill-certificate
+name: Bill Certificate (Form BC-R)
+short_name: Bill Certificate
+description: Institute Form BC-R submitted to Dean Student Welfare for expense reimbursement
+  and bill passing.
+authority: Dean (Student Welfare)
+ref_category: BILL
+file_name: bill_certificate.docx
+version: 1

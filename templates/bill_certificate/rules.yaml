@@ -1,0 +1,5 @@
+rules:
+- id: rule-expenses-needed
+  description: Recommended when events involve purchases, refreshments, printing,
+    or external vendors.
+  condition: hasExpenses == True
