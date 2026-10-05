@@ -131,3 +131,25 @@ def test_stats_and_reset():
     assert reset_res.status_code == 200
     assert reset_res.json()["status"] == "ok"
 
+
+def test_extracted_logos():
+    from pathlib import Path
+    from PIL import Image
+    assets = Path("backend/assets")
+    svnit_path = assets / "svnit_logo.png"
+    acm_path = assets / "acm_logo.png"
+
+    assert svnit_path.exists(), "svnit_logo.png missing in backend/assets"
+    assert acm_path.exists(), "acm_logo.png missing in backend/assets"
+    assert svnit_path.stat().st_size > 1000
+    assert acm_path.stat().st_size > 1000
+
+    with Image.open(svnit_path) as img:
+        assert img.format == "PNG"
+        assert img.width > 50 and img.height > 50
+
+    with Image.open(acm_path) as img:
+        assert img.format == "PNG"
+        assert img.width > 50 and img.height > 50
+
+
