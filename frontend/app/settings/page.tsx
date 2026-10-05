@@ -20,10 +20,12 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { getClub, updateClub } from "@/lib/api";
+import { useUserRole } from "@/lib/useRole";
 import type { Club, ReferenceFormat, Signatory } from "@/lib/types";
 import { toast } from "sonner";
 
 export default function ClubSettingsPage() {
+  const { role } = useUserRole();
   const [club, setClub] = useState<Club | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -116,13 +118,23 @@ export default function ClubSettingsPage() {
 
         <Button
           onClick={handleSave}
-          disabled={saving}
-          className="bg-[#4F81BD] hover:bg-[#3d689b] text-white text-xs gap-1.5 font-semibold"
+          disabled={saving || role === "member"}
+          title={role === "member" ? "Only Admin can save club settings" : undefined}
+          className={`text-white text-xs gap-1.5 font-semibold ${
+            role === "member" ? "bg-slate-400 cursor-not-allowed" : "bg-[#4F81BD] hover:bg-[#3d689b]"
+          }`}
         >
           {saving ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Save className="w-3.5 h-3.5" />}
           <span>Save Changes</span>
         </Button>
       </div>
+
+      {role === "member" && (
+        <div className="p-3 bg-amber-50 border border-amber-200 rounded-lg flex items-center gap-2 text-xs text-amber-900">
+          <span className="font-semibold">Member View:</span>
+          <span>You are viewing club settings in read-only mode. To modify branding, reference formats, and signatories, switch to the Admin role in the top navigation bar.</span>
+        </div>
+      )}
 
       <Tabs defaultValue="branding" className="w-full">
         <TabsList className="grid w-full grid-cols-4 max-w-xl bg-slate-200/80 p-1">

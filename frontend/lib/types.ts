@@ -2,14 +2,14 @@
  * ClubDocs domain types.
  *
  * These types are the contract between the UI and the API layer (`lib/api.ts`).
- * The FastAPI backend should return JSON matching these shapes (snake_case keys
- * are NOT converted automatically — keep the backend models in camelCase or add
- * a conversion step inside `lib/api.ts`).
+ * All models maintain a strict camelCase contract.
  */
 
 /* ------------------------------------------------------------------ */
-/* Primitive enums                                                     */
+/* Primitive enums & roles                                            */
 /* ------------------------------------------------------------------ */
+
+export type UserRole = "admin" | "member" | "faculty";
 
 /** Lifecycle status used for both events and documents. */
 export type Status = "draft" | "needs_info" | "ready" | "approved";
@@ -63,7 +63,7 @@ export interface Signatory {
 export interface ReferenceFormat {
   /** Document category, e.g. ROOM, BILL, GEN. */
   category: string;
-  /** Pattern with tokens {FY}, {AY}, {CLUB}, {seq}. */
+  /** Pattern with tokens {FY}, {AY}, {CLUB}, {EVENTCODE}, {seq}. */
   pattern: string;
   /** Last used sequence number. The next number is counter + 1. */
   counter: number;
@@ -95,6 +95,7 @@ export interface Club {
   academicYear: string;
   /** e.g. "26-27" — used for {FY} */
   financialYear: string;
+  retainSensitiveData?: boolean;
 }
 
 /* ------------------------------------------------------------------ */
@@ -105,6 +106,9 @@ export interface TableColumn {
   key: string;
   label: string;
   type: "text" | "number";
+  neverAI?: boolean;
+  masked?: boolean;
+  /** Backward compatibility for legacy stored mock data */
   sensitive?: boolean;
   /** Visual width hint in the editor (fr units). */
   width?: number;
@@ -117,24 +121,29 @@ export interface Placeholder {
   required: boolean;
   /** Question asked to the user when the value is missing. */
   question: string;
-  /** Official / personal data that must never be AI-filled. */
-  sensitive: boolean;
+  /** Official or critical data that must NEVER be guessed or filled by AI. */
+  neverAI: boolean;
+  /** Sensitive data that must be masked in the UI with a reveal toggle. */
+  masked: boolean;
+  /** Backward compatibility for legacy stored mock data */
+  sensitive?: boolean;
   /** Text the AI may draft (description, objective ...). */
   aiDraftable: boolean;
   /** Editor section heading. */
   section: string;
-  /** Shared across all documents of an event (title, dates, venue). */
+  /** Shared across all documents of an event (title, dates, venue, etc.). */
   shared?: boolean;
   options?: string[];
   columns?: TableColumn[];
   helpText?: string;
+  suggest?: string;
 }
 
 export interface RecommendationRule {
   id: string;
   /** Human readable rule, shown in the UI. */
   description: string;
-  /** Machine condition, evaluated by the backend. e.g. `venue != null` */
+  /** Machine condition, evaluated safely. e.g. `venue != null` */
   condition: string;
 }
 
@@ -188,16 +197,20 @@ export interface ExtractedField {
   /** 0..1 — model confidence. 0 for missing / club profile. */
   confidence: number;
   required: boolean;
-  sensitive: boolean;
+  neverAI: boolean;
+  masked: boolean;
+  /** Backward compatibility */
+  sensitive?: boolean;
   aiDraftable: boolean;
   question: string;
   section: string;
+  shared?: boolean;
   options?: string[];
   columns?: TableColumn[];
   helpText?: string;
-  /** For sensitive fields: was the value explicitly entered by a human? */
+  /** For sensitive / neverAI fields: was the value explicitly entered by a human? */
   userConfirmed?: boolean;
-  /** Optional suggestion the user may explicitly accept (never auto-applied). */
+  /** Suggested default if any. */
   suggestion?: string;
 }
 
@@ -323,6 +336,8 @@ export interface SaveDocumentResult {
   document: GeneratedDocument;
   /** Other documents updated because shared fields changed. */
   propagatedTo: string[];
+  /** Labels of shared fields that were propagated. */
+  updatedFields: string[];
 }
 
 export type ExportFormat = "docx" | "pdf";
@@ -331,6 +346,10 @@ export type ExportResult =
   | { kind: "file"; blob: Blob; filename: string }
   /** Mock only: ask the UI to print the on-screen A4 preview as PDF. */
   | { kind: "print" };
+
+export interface ReferencePeekResult {
+  ref: string;
+}
 
 /* ------------------------------------------------------------------ */
 /* Analytics                                                           */

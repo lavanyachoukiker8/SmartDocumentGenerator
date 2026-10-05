@@ -1,14 +1,20 @@
 import type { Club, FieldValue, FieldValues, Placeholder, TableRow } from "./types";
 
 /**
- * Builds a reference number from a format like `ACM/{FY}/ROOM/{seq}`.
+ * Builds a reference number from a format like `ACM/{FY}/ROOM/{seq}` or `ACM/{AY}/{EVENTCODE}/{seq}`.
  * Used to *suggest* the next number — the user must accept it explicitly.
  */
-export function formatReference(pattern: string, seq: number, club: Pick<Club, "financialYear" | "academicYear" | "shortName">): string {
+export function formatReference(
+  pattern: string,
+  seq: number,
+  club: Pick<Club, "financialYear" | "academicYear" | "shortName">,
+  eventCode = "GEN"
+): string {
   return pattern
     .replaceAll("{FY}", club.financialYear)
     .replaceAll("{AY}", club.academicYear)
     .replaceAll("{CLUB}", club.shortName)
+    .replaceAll("{EVENTCODE}", eventCode)
     .replaceAll("{seq}", String(seq).padStart(3, "0"));
 }
 
@@ -42,7 +48,7 @@ export function groupBySection<T extends { section: string }>(items: T[]): [stri
   return [...map.entries()];
 }
 
-/** Masks a sensitive value, keeping the last 4 characters. */
+/** Masks a sensitive value, keeping the last 4 characters visible. */
 export function maskValue(value: string, visible = 4): string {
   if (!value) return "";
   if (value.length <= visible) return "•".repeat(value.length);

@@ -15,8 +15,52 @@ export interface MockDB {
   seq: number;
 }
 
-const STORAGE_KEY = "clubdocs.mock.v1";
+const OLD_STORAGE_KEY = "clubdocs.mock.v1";
+const STORAGE_KEY = "clubdocs.mock.v2";
 let db: MockDB | null = null;
+
+function migrateV1toV2(rawV1: MockDB): MockDB {
+  const isSecretKey = (k: string) => /bank|ifsc|gst|mobile|account/i.test(k);
+  const isOfficialKey = (k: string) => /ref_no|approval|invoice|purchase|head_of_account|date/i.test(k);
+
+  // Migrate templates
+  for (const t of rawV1.templates || []) {
+    for (const p of t.placeholders || []) {
+      if (p.neverAI === undefined) {
+        p.neverAI = isSecretKey(p.key) || isOfficialKey(p.key) || !!p.sensitive;
+      }
+      if (p.masked === undefined) {
+        p.masked = isSecretKey(p.key);
+      }
+      if (p.columns) {
+        for (const col of p.columns) {
+          if (col.neverAI === undefined) col.neverAI = isSecretKey(col.key) || isOfficialKey(col.key) || !!col.sensitive;
+          if (col.masked === undefined) col.masked = isSecretKey(col.key);
+        }
+      }
+    }
+  }
+
+  // Migrate events
+  for (const e of rawV1.events || []) {
+    for (const f of e.fields || []) {
+      if (f.neverAI === undefined) {
+        f.neverAI = isSecretKey(f.key) || isOfficialKey(f.key) || !!f.sensitive;
+      }
+      if (f.masked === undefined) {
+        f.masked = isSecretKey(f.key);
+      }
+      if (f.columns) {
+        for (const col of f.columns) {
+          if (col.neverAI === undefined) col.neverAI = isSecretKey(col.key) || isOfficialKey(col.key) || !!col.sensitive;
+          if (col.masked === undefined) col.masked = isSecretKey(col.key);
+        }
+      }
+    }
+  }
+
+  return rawV1;
+}
 
 function seed(): MockDB {
   const { events, documents } = buildSeed();
@@ -33,9 +77,16 @@ export function getDB(): MockDB {
   if (db) return db;
   if (typeof window !== "undefined") {
     try {
-      const raw = window.localStorage.getItem(STORAGE_KEY);
-      if (raw) {
-        db = JSON.parse(raw) as MockDB;
+      const rawV2 = window.localStorage.getItem(STORAGE_KEY);
+      if (rawV2) {
+        db = JSON.parse(rawV2) as MockDB;
+        return db;
+      }
+      const rawV1 = window.localStorage.getItem(OLD_STORAGE_KEY);
+      if (rawV1) {
+        const parsed = JSON.parse(rawV1) as MockDB;
+        db = migrateV1toV2(parsed);
+        persist();
         return db;
       }
     } catch {

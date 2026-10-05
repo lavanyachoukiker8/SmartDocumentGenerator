@@ -3,11 +3,21 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import Image from "next/image";
-import { FileText, PlusCircle, LayoutTemplate, Settings, History, Sparkles } from "lucide-react";
+import {
+  FileText,
+  PlusCircle,
+  LayoutTemplate,
+  Settings,
+  History,
+} from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { isMockMode } from "@/lib/api";
+import { useUserRole } from "@/lib/useRole";
+import type { UserRole } from "@/lib/types";
 
 export function Navbar() {
   const pathname = usePathname();
+  const { role, setRole, mounted } = useUserRole();
 
   const navLinks = [
     { href: "/", label: "Dashboard", icon: FileText },
@@ -22,7 +32,7 @@ export function Navbar() {
         <div className="flex items-center gap-6">
           <Link href="/" className="flex items-center gap-3 group">
             <div className="relative w-8 h-8 rounded-lg overflow-hidden border border-slate-200 bg-white shadow-xs p-1">
-              <Image src="/logos/acm.svg" alt="ACM Logo" fill className="object-contain" />
+              <Image src="/logos/acm.svg" alt="ACM Logo" fill className="object-contain" priority />
             </div>
             <div>
               <div className="flex items-center gap-1.5">
@@ -60,6 +70,33 @@ export function Navbar() {
         </div>
 
         <div className="flex items-center gap-3">
+          {/* Mock Mode & Role Switcher */}
+          {isMockMode && (
+            <div className="hidden lg:flex items-center gap-2 px-2.5 py-1 rounded-lg bg-amber-50 border border-amber-200 text-xs">
+              <span className="inline-flex items-center gap-1 font-semibold text-amber-800">
+                <span className="w-1.5 h-1.5 rounded-full bg-amber-500 animate-pulse" />
+                Mock Mode
+              </span>
+              <span className="text-amber-300">|</span>
+              <div className="flex items-center gap-1">
+                <span className="text-slate-500 text-[11px]">Role:</span>
+                {mounted ? (
+                  <select
+                    value={role}
+                    onChange={(e) => setRole(e.target.value as UserRole)}
+                    className="text-xs font-semibold bg-white border border-amber-300 rounded px-1.5 py-0.5 text-slate-800 focus:outline-none focus:ring-1 focus:ring-[#4F81BD]"
+                  >
+                    <option value="admin">Admin</option>
+                    <option value="member">Member</option>
+                    <option value="faculty">Faculty</option>
+                  </select>
+                ) : (
+                  <span className="text-xs font-semibold text-slate-800">Admin</span>
+                )}
+              </div>
+            </div>
+          )}
+
           <Link href="/new">
             <Button className="bg-[#4F81BD] hover:bg-[#3d689b] text-white shadow-xs gap-2 font-medium">
               <PlusCircle className="w-4 h-4" />

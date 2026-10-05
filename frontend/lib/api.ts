@@ -26,28 +26,49 @@ import type {
   GenerateOptions,
   GeneratedDocument,
   NewTemplateInput,
+  ReferencePeekResult,
   SaveDocumentResult,
   Status,
   Template,
   TemplateAnalysis,
 } from "./types";
 
-const USE_MOCK = process.env.NEXT_PUBLIC_USE_MOCK !== "false";
+export const isMockMode = process.env.NEXT_PUBLIC_USE_MOCK !== "false";
+const USE_MOCK = isMockMode;
 const BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL || "http://localhost:8000";
 
 async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
-  const res = await fetch(`${BASE_URL}${path}`, {
-    ...options,
-    headers: {
-      "Content-Type": "application/json",
-      ...(options.headers || {}),
-    },
-  });
-  if (!res.ok) {
-    const errorBody = await res.text().catch(() => "");
-    throw new Error(`API Error ${res.status}: ${res.statusText} - ${errorBody}`);
+  let res: Response;
+  try {
+    res = await fetch(`${BASE_URL}${path}`, {
+      ...options,
+      headers: {
+        "Content-Type": "application/json",
+        ...(options.headers || {}),
+      },
+    });
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err);
+    throw new Error(`Could not connect to ClubDocs backend at ${BASE_URL}. Is the server running? (${msg})`);
   }
-  return res.json();
+
+  if (!res.ok) {
+    let errorDetail = res.statusText;
+    try {
+      const errorJson = await res.json();
+      errorDetail = errorJson.detail || errorJson.message || JSON.stringify(errorJson);
+    } catch {
+      const errorBody = await res.text().catch(() => "");
+      if (errorBody) errorDetail = errorBody;
+    }
+    throw new Error(`API Error ${res.status}: ${errorDetail}`);
+  }
+
+  const data = await res.json();
+  if (data === null || data === undefined) {
+    throw new Error(`Empty response received from ${path}`);
+  }
+  return data as T;
 }
 
 /* ================================================================== */
@@ -67,9 +88,14 @@ export async function updateClub(club: Club): Promise<Club> {
   });
 }
 
-export async function reserveReference(category: string): Promise<string> {
-  if (USE_MOCK) return mock.reserveReference(category);
-  return request<string>(`/api/club/reference/${category}/next`, { method: "POST" });
+export async function peekReference(category: string, eventCode = "GEN"): Promise<ReferencePeekResult> {
+  if (USE_MOCK) return mock.peekReference(category, eventCode);
+  return request<ReferencePeekResult>(`/api/club/reference/${category}/peek?eventCode=${encodeURIComponent(eventCode)}`);
+}
+
+export async function reserveReference(category: string, eventCode = "GEN"): Promise<string> {
+  if (USE_MOCK) return mock.reserveReference(category, eventCode);
+  return request<string>(`/api/club/reference/${category}/next?eventCode=${encodeURIComponent(eventCode)}`, { method: "POST" });
 }
 
 /* ================================================================== */
@@ -178,19 +204,33 @@ export async function restoreVersion(id: string, version: number): Promise<Gener
   });
 }
 
+function parseContentDispositionFilename(disposition: string | null, fallback: string): string {
+  if (!disposition) return fallback;
+  const utf8Match = /filename\*=UTF-8''([^;\s]+)/i.exec(disposition);
+  if (utf8Match && utf8Match[1]) {
+    try {
+      return decodeURIComponent(utf8Match[1].replace(/["']/g, ""));
+    } catch {
+      // fallback
+    }
+  }
+  const stdMatch = /filename="?([^";]+)"?/i.exec(disposition);
+  if (stdMatch && stdMatch[1]) {
+    return stdMatch[1].trim();
+  }
+  return fallback;
+}
+
 export async function exportDocument(id: string, format: ExportFormat): Promise<ExportResult> {
   if (USE_MOCK) return mock.exportDocument(id, format);
-  if (format === "pdf") {
-    return { kind: "print" };
-  }
   const res = await fetch(`${BASE_URL}/api/documents/${id}/export?format=${format}`);
-  if (!res.ok) throw new Error("Export failed");
+  if (!res.ok) {
+    const errorBody = await res.text().catch(() => "");
+    throw new Error(`Export failed (${res.status}): ${errorBody || res.statusText}`);
+  }
   const blob = await res.blob();
   const disposition = res.headers.get("Content-Disposition");
-  let filename = `document_${id}.${format}`;
-  if (disposition && disposition.includes("filename=")) {
-    filename = disposition.split("filename=")[1].replace(/["']/g, "").trim();
-  }
+  const filename = parseContentDispositionFilename(disposition, `document_${id}.${format}`);
   return { kind: "file", blob, filename };
 }
 

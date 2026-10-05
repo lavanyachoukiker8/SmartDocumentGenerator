@@ -292,21 +292,24 @@ export function buildFields(
     let source: FieldSource = "missing";
     let conf = 0;
     const userVal = user.values[p.key];
+    const neverAI = p.neverAI || !!p.sensitive;
+    const masked = p.masked || /bank|ifsc|gst|mobile|account/i.test(p.key);
+
     if (!isEmptyValue(userVal)) {
       value = userVal;
       source = user.sources?.[p.key] ?? "user_text";
       conf = user.confidence?.[p.key] ?? 0.95;
-    } else if (!p.sensitive && !isEmptyValue(profile[p.key])) {
+    } else if (!neverAI && !isEmptyValue(profile[p.key])) {
       value = profile[p.key];
       source = "club_profile";
       conf = 1;
-    } else if (!p.sensitive && p.aiDraftable && !isEmptyValue(drafts[p.key])) {
+    } else if (!neverAI && p.aiDraftable && !isEmptyValue(drafts[p.key])) {
       value = drafts[p.key];
       source = "ai_draft";
       conf = 0.6;
     }
-    // Hard guard: sensitive values only survive when typed by a human.
-    if (p.sensitive && source !== "user_text") {
+    // Hard guard: neverAI / official fields only survive when explicitly typed by a human
+    if (neverAI && source !== "user_text") {
       value = null;
       source = "missing";
       conf = 0;
@@ -319,14 +322,17 @@ export function buildFields(
       source,
       confidence: conf,
       required: p.required,
+      neverAI,
+      masked,
       sensitive: p.sensitive,
       aiDraftable: p.aiDraftable,
       question: p.question,
       section: p.section,
+      shared: p.shared,
       options: p.options,
       columns: p.columns,
       helpText: p.helpText,
-      userConfirmed: p.sensitive && source === "user_text" ? true : undefined,
+      userConfirmed: neverAI && source === "user_text" ? true : undefined,
       suggestion: sugg[p.key],
     };
   });

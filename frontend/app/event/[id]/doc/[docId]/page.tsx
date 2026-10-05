@@ -17,9 +17,13 @@ import {
   CheckCircle2,
   ExternalLink,
   Lock,
+  FileText,
+  Eye,
+  Info,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
@@ -37,9 +41,11 @@ import {
   exportDocument,
   regenerateFromEvent,
   setDocumentStatus,
+  isMockMode,
 } from "@/lib/api";
+import { useUserRole } from "@/lib/useRole";
 import type { Club, FieldValue, FieldValues, GeneratedDocument, TableRow, Template } from "@/lib/types";
-import { asRows, asText, groupBySection, isEmptyValue, maskValue } from "@/lib/fields";
+import { asRows, asText, groupBySection, isEmptyValue } from "@/lib/fields";
 import { formatDateTime } from "@/lib/format";
 import { toast } from "sonner";
 
@@ -52,6 +58,8 @@ export default function DocumentEditorPage({ params }: DocEditorPageProps) {
   const eventId = resolvedParams.id;
   const docId = resolvedParams.docId;
 
+  const { role } = useUserRole();
+
   const [document, setDocument] = useState<GeneratedDocument | null>(null);
   const [template, setTemplate] = useState<Template | null>(null);
   const [club, setClub] = useState<Club | null>(null);
@@ -60,6 +68,11 @@ export default function DocumentEditorPage({ params }: DocEditorPageProps) {
   const [regenerating, setRegenerating] = useState(false);
   const [exportingDocx, setExportingDocx] = useState(false);
   const [exportingPdf, setExportingPdf] = useState(false);
+
+  // PDF Preview Modal
+  const [pdfModalOpen, setPdfModalOpen] = useState(false);
+  const [pdfBlobUrl, setPdfBlobUrl] = useState<string | null>(null);
+  const [loadingPdfPreview, setLoadingPdfPreview] = useState(false);
 
   // Form values being edited locally
   const [values, setValues] = useState<FieldValues>({});
@@ -85,6 +98,13 @@ export default function DocumentEditorPage({ params }: DocEditorPageProps) {
   useEffect(() => {
     loadData();
   }, [docId]);
+
+  // Clean up blob url on unmount or change
+  useEffect(() => {
+    return () => {
+      if (pdfBlobUrl) URL.revokeObjectURL(pdfBlobUrl);
+    };
+  }, [pdfBlobUrl]);
 
   const handleFieldChange = (key: string, value: FieldValue) => {
     setValues((prev) => ({ ...prev, [key]: value }));
@@ -130,8 +150,9 @@ export default function DocumentEditorPage({ params }: DocEditorPageProps) {
       setDocument(res.document);
       setIsDirty(false);
       if (res.propagatedTo.length > 0) {
+        const fieldsList = res.updatedFields?.length ? ` (${res.updatedFields.join(", ")})` : "";
         toast.info(
-          `Saved v${res.document.currentVersion}. Changes to shared event fields updated ${res.propagatedTo.length} other ${res.propagatedTo.length === 1 ? "document" : "documents"}.`
+          `Saved v${res.document.currentVersion}. Changes to shared fields${fieldsList} updated ${res.propagatedTo.length} other ${res.propagatedTo.length === 1 ? "document" : "documents"}.`
         );
       } else {
         toast.success(`Saved document v${res.document.currentVersion}`);
@@ -169,6 +190,29 @@ export default function DocumentEditorPage({ params }: DocEditorPageProps) {
     }
   };
 
+  const handlePreviewPdf = async () => {
+    if (isMockMode) {
+      setPdfModalOpen(true);
+      return;
+    }
+    try {
+      setLoadingPdfPreview(true);
+      const res = await exportDocument(docId, "pdf");
+      if (res.kind === "file") {
+        if (pdfBlobUrl) URL.revokeObjectURL(pdfBlobUrl);
+        const url = URL.createObjectURL(res.blob);
+        setPdfBlobUrl(url);
+        setPdfModalOpen(true);
+      } else {
+        window.print();
+      }
+    } catch (err: any) {
+      toast.error(err.message || "Failed to load PDF preview");
+    } finally {
+      setLoadingPdfPreview(false);
+    }
+  };
+
   const handleExport = async (format: "docx" | "pdf") => {
     try {
       if (format === "docx") setExportingDocx(true);
@@ -197,12 +241,16 @@ export default function DocumentEditorPage({ params }: DocEditorPageProps) {
 
   const handleToggleApproved = async () => {
     if (!document) return;
+    if (role === "member") {
+      toast.error("Approval requires Faculty or Admin role.");
+      return;
+    }
     const nextStatus = document.status === "approved" ? "ready" : "approved";
     try {
       const updated = await setDocumentStatus(docId, nextStatus);
       setDocument(updated);
       toast.success(`Document marked as ${nextStatus}`);
-    } catch (err) {
+    } catch {
       toast.error("Failed to update status");
     }
   };
@@ -217,6 +265,11 @@ export default function DocumentEditorPage({ params }: DocEditorPageProps) {
   }
 
   const sections = groupBySection(template.placeholders);
+
+  // Compute changed shared fields for notice
+  const changedSharedPlaceholders = template.placeholders.filter(
+    (p) => p.shared && JSON.stringify(values[p.key]) !== JSON.stringify(document.values[p.key])
+  );
 
   return (
     <div className="space-y-6 animate-in fade-in duration-300">
@@ -313,6 +366,19 @@ export default function DocumentEditorPage({ params }: DocEditorPageProps) {
             <span>Regenerate all</span>
           </Button>
 
+          {/* Preview PDF */}
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={handlePreviewPdf}
+            disabled={loadingPdfPreview}
+            className="gap-1.5 text-xs text-slate-700"
+            title="Preview rendered PDF"
+          >
+            {loadingPdfPreview ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Eye className="w-3.5 h-3.5 text-slate-600" />}
+            <span>Preview PDF</span>
+          </Button>
+
           {/* Download DOCX */}
           <Button
             variant="outline"
@@ -352,8 +418,12 @@ export default function DocumentEditorPage({ params }: DocEditorPageProps) {
             variant={document.status === "approved" ? "secondary" : "default"}
             size="sm"
             onClick={handleToggleApproved}
+            disabled={role === "member"}
+            title={role === "member" ? "Only Faculty or Admin can approve documents" : undefined}
             className={`text-xs gap-1.5 font-semibold ${
-              document.status === "approved"
+              role === "member"
+                ? "opacity-60 cursor-not-allowed"
+                : document.status === "approved"
                 ? "bg-emerald-100 text-emerald-800 hover:bg-emerald-200"
                 : "bg-emerald-700 hover:bg-emerald-800 text-white"
             }`}
@@ -382,6 +452,17 @@ export default function DocumentEditorPage({ params }: DocEditorPageProps) {
         </div>
       )}
 
+      {/* Notice when editing shared fields */}
+      {changedSharedPlaceholders.length > 0 && (
+        <div className="p-3 bg-blue-50 border border-blue-200 rounded-lg flex items-center gap-2 text-xs text-blue-900 print:hidden">
+          <Info className="w-4 h-4 text-[#4F81BD] shrink-0" />
+          <span>
+            <b>Shared field edit:</b> You modified{" "}
+            {changedSharedPlaceholders.map((p) => p.label).join(", ")}. Saving this document will automatically update all other documents for this event to maintain consistency.
+          </span>
+        </div>
+      )}
+
       {/* Editor Split View: Left = Field Editor | Right = Live A4 Preview */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
         {/* Left Column: Grouped Field Editor (5 cols) */}
@@ -396,8 +477,9 @@ export default function DocumentEditorPage({ params }: DocEditorPageProps) {
               <CardContent className="p-4 space-y-4">
                 {placeholders.map((p) => {
                   const val = values[p.key];
-                  const isSensitive = p.sensitive;
+                  const isMasked = p.masked;
                   const isShared = p.shared;
+                  const isNeverAI = p.neverAI;
 
                   return (
                     <div key={p.key} className="space-y-1.5 pb-2 border-b border-slate-100 last:border-0 last:pb-0">
@@ -412,12 +494,16 @@ export default function DocumentEditorPage({ params }: DocEditorPageProps) {
                               Shared field
                             </span>
                           )}
-                          {isSensitive && (
+                          {isMasked ? (
                             <span className="text-[10px] text-slate-500 bg-slate-100 px-1.5 py-0.2 rounded font-medium flex items-center gap-1">
                               <Lock className="w-2.5 h-2.5" />
                               Masked
                             </span>
-                          )}
+                          ) : isNeverAI ? (
+                            <span className="text-[10px] text-amber-800 bg-amber-50 border border-amber-200 px-1.5 py-0.2 rounded font-medium">
+                              Official
+                            </span>
+                          ) : null}
                         </div>
                       </div>
 
@@ -426,7 +512,7 @@ export default function DocumentEditorPage({ params }: DocEditorPageProps) {
                       )}
 
                       {/* Text / Number / Date / Time inputs */}
-                      {(p.type === "text" || p.type === "number" || p.type === "date" || p.type === "time") && !isSensitive && (
+                      {(p.type === "text" || p.type === "number" || p.type === "date" || p.type === "time") && !isMasked && (
                         <Input
                           id={`ed-${p.key}`}
                           type={p.type === "number" ? "number" : p.type === "date" ? "date" : p.type === "time" ? "time" : "text"}
@@ -437,8 +523,8 @@ export default function DocumentEditorPage({ params }: DocEditorPageProps) {
                         />
                       )}
 
-                      {/* Masked Sensitive input */}
-                      {p.type === "text" && isSensitive && (
+                      {/* Masked input */}
+                      {p.type === "text" && isMasked && (
                         <MaskedInput
                           id={`ed-${p.key}`}
                           value={(val as string) || ""}
@@ -508,7 +594,7 @@ export default function DocumentEditorPage({ params }: DocEditorPageProps) {
                                   {p.columns?.map((col) => (
                                     <div key={col.key} className="space-y-0.5">
                                       <span className="text-[10px] text-slate-500">{col.label}</span>
-                                      {col.sensitive ? (
+                                      {col.masked ? (
                                         <MaskedInput
                                           id={`tbl-${p.key}-${rIdx}-${col.key}`}
                                           value={row[col.key] || ""}
@@ -541,12 +627,60 @@ export default function DocumentEditorPage({ params }: DocEditorPageProps) {
         {/* Right Column: Live A4 Letterhead Preview (7 cols) */}
         <div className="lg:col-span-7 space-y-2">
           <div className="flex items-center justify-between text-xs text-slate-500 px-1 print:hidden">
-            <span>Live A4 Letterhead Preview</span>
+            <span>Live A4 Letterhead Preview (Quick Live Mode)</span>
             <span className="italic">Unfilled fields highlighted yellow</span>
           </div>
           <A4DocumentPreview templateId={template.id} values={values} club={club} />
         </div>
       </div>
+
+      {/* PDF Exact Preview Dialog */}
+      <Dialog open={pdfModalOpen} onOpenChange={setPdfModalOpen}>
+        <DialogContent className="max-w-4xl max-h-[95vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle className="text-base font-bold text-[#1F3A5F] flex items-center gap-2">
+              <FileText className="w-4 h-4 text-red-600" />
+              <span>Exact Output PDF Preview</span>
+            </DialogTitle>
+            <DialogDescription className="text-xs">
+              {isMockMode
+                ? "In Mock Mode, PDF export uses browser print layout. In Real Backend Mode (FastAPI + LibreOffice headless), the exact pixel-identical PDF rendered from the .docx template will display here."
+                : "This preview is the exact binary PDF rendered by the backend from the official .docx template via headless LibreOffice."}
+            </DialogDescription>
+          </DialogHeader>
+
+          {isMockMode ? (
+            <div className="p-8 border border-dashed border-slate-200 rounded-xl text-center space-y-3 bg-slate-50">
+              <p className="text-sm font-semibold text-slate-800">
+                You are currently running ClubDocs in Mock Mode.
+              </p>
+              <p className="text-xs text-slate-500 max-w-md mx-auto">
+                The quick live preview on the right shows the styled A4 view. To generate a real PDF in mock mode, click Print below to use your browser&apos;s Print to PDF engine.
+              </p>
+              <div className="pt-2 flex justify-center gap-3">
+                <Button
+                  onClick={() => {
+                    setPdfModalOpen(false);
+                    window.print();
+                  }}
+                  className="bg-[#4F81BD] hover:bg-[#3d689b] text-white text-xs gap-2"
+                >
+                  <Download className="w-4 h-4" />
+                  <span>Print / Save as PDF</span>
+                </Button>
+              </div>
+            </div>
+          ) : pdfBlobUrl ? (
+            <div className="border border-slate-200 rounded-lg overflow-hidden">
+              <iframe src={pdfBlobUrl} className="w-full h-[700px] border-0" title="Backend PDF Output" />
+            </div>
+          ) : (
+            <div className="p-8 text-center text-slate-500 text-xs">
+              Loading PDF from backend...
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

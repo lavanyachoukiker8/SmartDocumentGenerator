@@ -19,6 +19,7 @@ import type {
   GeneratedDocument,
   NewTemplateInput,
   Placeholder,
+  ReferencePeekResult,
   SaveDocumentResult,
   Status,
   Template,
@@ -138,14 +139,24 @@ export async function updateClub(club: Club): Promise<Club> {
   return delay(club, 400);
 }
 
+/** Peek the next reference number for a category without incrementing the counter. */
+export async function peekReference(category: string, eventCode = "GEN"): Promise<ReferencePeekResult> {
+  const club = getDB().club;
+  const fmt = club.referenceFormats.find((f) => f.category === category);
+  if (!fmt) throw new NotFoundError(`Reference format ${category}`);
+  const nextSeq = fmt.counter + 1;
+  const ref = formatReference(fmt.pattern, nextSeq, club, eventCode);
+  return delay({ ref }, 150);
+}
+
 /** Explicitly reserve the next reference number for a category. */
-export async function reserveReference(category: string): Promise<string> {
+export async function reserveReference(category: string, eventCode = "GEN"): Promise<string> {
   const club = getDB().club;
   const fmt = club.referenceFormats.find((f) => f.category === category);
   if (!fmt) throw new NotFoundError(`Reference format ${category}`);
   fmt.counter += 1;
   persist();
-  return delay(formatReference(fmt.pattern, fmt.counter, club), 250);
+  return delay(formatReference(fmt.pattern, fmt.counter, club, eventCode), 250);
 }
 
 /* ================================================================== */
@@ -253,6 +264,24 @@ export async function generateDocuments(
   const out: GeneratedDocument[] = [];
   for (const t of templates) {
     const docValues = docValuesFor(t, e.fields);
+
+    // Reserve reference number if template has refCategory and ref_no is not yet assigned
+    if (t.refCategory && !docValues.ref_no) {
+      const fmt = db.club.referenceFormats.find((f) => f.category === t.refCategory);
+      if (fmt) {
+        fmt.counter += 1;
+        const eventCode = (e.category || "GEN").toUpperCase();
+        const generatedRef = formatReference(fmt.pattern, fmt.counter, db.club, eventCode);
+        docValues.ref_no = generatedRef;
+        const refField = e.fields.find((f) => f.key === "ref_no");
+        if (refField && isEmptyValue(refField.value)) {
+          refField.value = generatedRef;
+          refField.source = "user_text";
+          refField.userConfirmed = true;
+        }
+      }
+    }
+
     const existing = db.documents.find((d) => d.eventId === e.id && d.templateId === t.id);
     if (existing) {
       pushVersion(existing, docValues, "Regenerated from event", "ClubDocs (generated)");
@@ -347,6 +376,10 @@ export async function saveDocument(id: string, values: FieldValues, note = "Edit
   const sharedKeys = t.placeholders
     .filter((p) => p.shared && JSON.stringify(values[p.key]) !== JSON.stringify(d.values[p.key]))
     .map((p) => p.key);
+  const updatedFields = t.placeholders
+    .filter((p) => sharedKeys.includes(p.key))
+    .map((p) => p.label);
+
   pushVersion(d, values, note);
   if (d.status === "needs_info" && !d.hasPlaceholders) d.status = "ready";
 
@@ -358,7 +391,7 @@ export async function saveDocument(id: string, values: FieldValues, note = "Edit
       f.value = values[p.key];
       f.source = "user_text";
       f.confidence = 1;
-      if (f.sensitive) f.userConfirmed = true;
+      if (f.sensitive || f.neverAI) f.userConfirmed = true;
     }
   }
   const propagatedTo: string[] = [];
@@ -377,7 +410,7 @@ export async function saveDocument(id: string, values: FieldValues, note = "Edit
   refreshEventSummary(e);
   d.eventTitle = e.title;
   persist();
-  return delay({ document: d, propagatedTo }, 500);
+  return delay({ document: d, propagatedTo, updatedFields }, 500);
 }
 
 export async function setDocumentStatus(id: string, status: Status): Promise<GeneratedDocument> {
@@ -472,16 +505,20 @@ function guessPlaceholder(key: string): Placeholder {
         : DRAFTABLE_RE.test(key)
           ? "longtext"
           : "text";
+  const isNeverAI = SENSITIVE_RE.test(key) || /ref_no|approval|invoice|purchase|head_of_account|date/i.test(key);
+  const isMasked = SENSITIVE_RE.test(key);
   return {
     key,
     label,
     type,
     required: !/optional|note|remark/i.test(key),
     question: `What is the ${label.toLowerCase()}?`,
+    neverAI: isNeverAI,
+    masked: isMasked,
     sensitive: SENSITIVE_RE.test(key),
     aiDraftable: DRAFTABLE_RE.test(key) && !SENSITIVE_RE.test(key),
     section: "Details",
-    columns: type === "table" ? [{ key: "name", label: "Name", type: "text" }, { key: "value", label: "Value", type: "text" }] : undefined,
+    columns: type === "table" ? [{ key: "name", label: "Name", type: "text", neverAI: false, masked: false }, { key: "value", label: "Value", type: "text", neverAI: false, masked: false }] : undefined,
   };
 }
 
@@ -510,6 +547,8 @@ function applyYaml(placeholders: Placeholder[], yaml: string): { list: Placehold
       type: (b.type as Placeholder["type"]) ?? p.type,
       required: b.required ? b.required === "true" : p.required,
       question: b.question ?? p.question,
+      neverAI: b.never_ai ? b.never_ai === "true" : (b.sensitive ? b.sensitive === "true" : p.neverAI),
+      masked: b.masked ? b.masked === "true" : (b.sensitive ? b.sensitive === "true" : p.masked),
       sensitive: b.sensitive ? b.sensitive === "true" : p.sensitive,
       aiDraftable: b.ai_draftable ? b.ai_draftable === "true" : p.aiDraftable,
     };

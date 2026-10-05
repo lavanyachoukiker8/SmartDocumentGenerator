@@ -15,6 +15,10 @@ import {
   Info,
   Layers,
   Lock,
+  MessageSquare,
+  ChevronRight,
+  SkipForward,
+  LayoutGrid,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -25,7 +29,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Stepper } from "@/components/stepper";
 import { FieldSourceBadge } from "@/components/field-source-badge";
 import { MaskedInput } from "@/components/masked-input";
-import { getEvent, getRecommendations, updateEventFields, generateDocuments } from "@/lib/api";
+import { getEvent, getRecommendations, updateEventFields, generateDocuments, peekReference } from "@/lib/api";
 import type { ClubEvent, DocumentRecommendation, ExtractedField, FieldValue } from "@/lib/types";
 import { isEmptyValue, groupBySection } from "@/lib/fields";
 import { toast } from "sonner";
@@ -48,6 +52,10 @@ export default function ExtractionReviewPage({ params }: ReviewPageProps) {
 
   // Local draft values for extracted fields
   const [fieldEdits, setFieldEdits] = useState<Record<string, FieldValue>>({});
+
+  // Assistant mode: "chat" (step-by-step) vs "grid"
+  const [assistantView, setAssistantView] = useState<"step" | "grid">("step");
+  const [currentStepIdx, setCurrentStepIdx] = useState(0);
 
   const loadEvent = async () => {
     try {
@@ -87,8 +95,8 @@ export default function ExtractionReviewPage({ params }: ReviewPageProps) {
       setEvent(updated);
       const recs = await getRecommendations(eventId);
       setRecommendations(recs);
-    } catch (err) {
-      // quiet sync error or toast
+    } catch {
+      // quiet sync error
     }
   };
 
@@ -137,6 +145,7 @@ export default function ExtractionReviewPage({ params }: ReviewPageProps) {
   }
 
   const sections = groupBySection(event.fields);
+  const activeStepField = requiredMissingFields[Math.min(currentStepIdx, Math.max(0, requiredMissingFields.length - 1))];
 
   return (
     <div className="space-y-6 animate-in fade-in duration-300">
@@ -164,75 +173,206 @@ export default function ExtractionReviewPage({ params }: ReviewPageProps) {
       {requiredMissingFields.length > 0 && (
         <Card className="border-amber-300 bg-amber-50/70 shadow-xs">
           <CardHeader className="pb-2">
-            <div className="flex items-center gap-2">
-              <AlertTriangle className="w-5 h-5 text-amber-600 shrink-0" />
-              <CardTitle className="text-sm font-bold text-amber-900">
-                Needs your input ({requiredMissingFields.length} required {requiredMissingFields.length === 1 ? "field" : "fields"} incomplete)
-              </CardTitle>
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+              <div className="flex items-center gap-2">
+                <AlertTriangle className="w-5 h-5 text-amber-600 shrink-0" />
+                <CardTitle className="text-sm font-bold text-amber-900">
+                  Needs your input ({requiredMissingFields.length} required {requiredMissingFields.length === 1 ? "field" : "fields"} incomplete)
+                </CardTitle>
+              </div>
+              <div className="flex items-center gap-1 self-end sm:self-auto">
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => setAssistantView("step")}
+                  className={`h-7 text-xs px-2 gap-1.5 ${assistantView === "step" ? "bg-amber-200/80 text-amber-900 font-semibold" : "text-amber-800"}`}
+                >
+                  <MessageSquare className="w-3.5 h-3.5" />
+                  <span>Step-by-step</span>
+                </Button>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => setAssistantView("grid")}
+                  className={`h-7 text-xs px-2 gap-1.5 ${assistantView === "grid" ? "bg-amber-200/80 text-amber-900 font-semibold" : "text-amber-800"}`}
+                >
+                  <LayoutGrid className="w-3.5 h-3.5" />
+                  <span>All fields</span>
+                </Button>
+              </div>
             </div>
             <CardDescription className="text-xs text-amber-800">
               Official institutional letters cannot leave these details empty unless you explicitly choose to generate with placeholders.
             </CardDescription>
           </CardHeader>
-          <CardContent className="pt-2">
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-              {requiredMissingFields.map((f) => (
-                <div
-                  key={f.key}
-                  className="p-3 rounded-lg border border-amber-200 bg-white shadow-2xs space-y-2"
-                >
-                  <div className="flex items-start justify-between gap-2">
-                    <div>
-                      <span className="text-xs font-bold text-slate-800">{f.label}</span>
-                      <p className="text-[11px] text-amber-700 font-medium mt-0.5">{f.question}</p>
-                    </div>
-                    {f.sensitive ? (
-                      <span className="text-[10px] uppercase font-semibold text-amber-800 bg-amber-100 px-1.5 py-0.5 rounded">
-                        Not provided (Sensitive)
-                      </span>
-                    ) : (
-                      <FieldSourceBadge source={f.source} />
-                    )}
-                  </div>
 
+          <CardContent className="pt-2">
+            {assistantView === "step" && activeStepField ? (
+              <div className="p-4 rounded-lg border border-amber-200 bg-white shadow-2xs space-y-3">
+                <div className="flex items-center justify-between">
                   <div className="flex items-center gap-2">
-                    {f.sensitive ? (
+                    <span className="text-xs font-semibold px-2 py-0.5 rounded-full bg-amber-100 text-amber-900">
+                      Question {Math.min(currentStepIdx + 1, requiredMissingFields.length)} of {requiredMissingFields.length}
+                    </span>
+                    <span className="text-xs font-bold text-slate-900">{activeStepField.label}</span>
+                  </div>
+                  {activeStepField.neverAI && (
+                    <span className="text-[10px] font-semibold text-amber-800 bg-amber-100 px-2 py-0.5 rounded">
+                      Official (Never AI-filled)
+                    </span>
+                  )}
+                </div>
+
+                <div>
+                  <p className="text-xs font-medium text-amber-900">{activeStepField.question}</p>
+                  {activeStepField.key === "ref_no" && (
+                    <p className="text-[11px] text-slate-500 mt-0.5 italic">
+                      Suggested reference format. It will be reserved when you generate.
+                    </p>
+                  )}
+                </div>
+
+                <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
+                  <div className="flex-1">
+                    {activeStepField.masked ? (
                       <MaskedInput
-                        id={`missing-${f.key}`}
-                        value={(fieldEdits[f.key] as string) || ""}
-                        onChange={(val) => handleFieldChange(f.key, val)}
-                        placeholder={`Enter ${f.label.toLowerCase()}`}
-                        className="h-8 text-xs bg-amber-50/30"
+                        id={`step-${activeStepField.key}`}
+                        value={(fieldEdits[activeStepField.key] as string) || ""}
+                        onChange={(val) => handleFieldChange(activeStepField.key, val)}
+                        placeholder={`Enter ${activeStepField.label.toLowerCase()}`}
+                        className="h-9 text-xs bg-amber-50/20"
                       />
                     ) : (
                       <Input
-                        id={`missing-${f.key}`}
-                        value={(fieldEdits[f.key] as string) || ""}
-                        onChange={(e) => handleFieldChange(f.key, e.target.value)}
-                        onBlur={() => handleFieldBlur(f.key)}
-                        placeholder={`Enter ${f.label.toLowerCase()}`}
-                        className="h-8 text-xs bg-amber-50/30"
+                        id={`step-${activeStepField.key}`}
+                        value={(fieldEdits[activeStepField.key] as string) || ""}
+                        onChange={(e) => handleFieldChange(activeStepField.key, e.target.value)}
+                        onBlur={() => handleFieldBlur(activeStepField.key)}
+                        placeholder={`Enter ${activeStepField.label.toLowerCase()}`}
+                        className="h-9 text-xs bg-amber-50/20"
                       />
                     )}
-                    {f.suggestion && (
-                      <Button
-                        type="button"
-                        variant="secondary"
-                        size="sm"
-                        onClick={() => {
-                          handleFieldChange(f.key, f.suggestion!);
-                          handleFieldBlur(f.key);
-                        }}
-                        className="h-8 text-[11px] shrink-0 bg-blue-50 text-[#1F3A5F] hover:bg-blue-100 border border-blue-200"
-                        title="Accept suggested default"
-                      >
-                        Accept Suggestion
-                      </Button>
-                    )}
                   </div>
+
+                  {activeStepField.suggestion && (
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={() => {
+                        handleFieldChange(activeStepField.key, activeStepField.suggestion!);
+                        handleFieldBlur(activeStepField.key);
+                      }}
+                      className="h-9 text-xs bg-blue-50 text-[#1F3A5F] hover:bg-blue-100 border-blue-200"
+                    >
+                      Use: {activeStepField.suggestion}
+                    </Button>
+                  )}
+
+                  <Button
+                    type="button"
+                    size="sm"
+                    onClick={() => {
+                      handleFieldBlur(activeStepField.key);
+                      if (currentStepIdx < requiredMissingFields.length - 1) {
+                        setCurrentStepIdx((idx) => idx + 1);
+                      } else {
+                        toast.success("Completed all missing questions!");
+                      }
+                    }}
+                    className="h-9 text-xs bg-[#4F81BD] hover:bg-[#3d689b] text-white gap-1"
+                  >
+                    <span>Save & Next</span>
+                    <ChevronRight className="w-3.5 h-3.5" />
+                  </Button>
+
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => {
+                      if (currentStepIdx < requiredMissingFields.length - 1) {
+                        setCurrentStepIdx((idx) => idx + 1);
+                      }
+                    }}
+                    className="h-9 text-xs text-slate-500 hover:text-slate-800 gap-1"
+                  >
+                    <SkipForward className="w-3.5 h-3.5" />
+                    <span>Skip</span>
+                  </Button>
                 </div>
-              ))}
-            </div>
+              </div>
+            ) : (
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                {requiredMissingFields.map((f) => (
+                  <div
+                    key={f.key}
+                    className="p-3 rounded-lg border border-amber-200 bg-white shadow-2xs space-y-2"
+                  >
+                    <div className="flex items-start justify-between gap-2">
+                      <div>
+                        <span className="text-xs font-bold text-slate-800">{f.label}</span>
+                        <p className="text-[11px] text-amber-700 font-medium mt-0.5">{f.question}</p>
+                        {f.key === "ref_no" && (
+                          <p className="text-[10px] text-slate-500 italic mt-0.5">
+                            It will be reserved when you generate.
+                          </p>
+                        )}
+                      </div>
+                      {f.masked ? (
+                        <span className="text-[10px] uppercase font-semibold text-amber-800 bg-amber-100 px-1.5 py-0.5 rounded">
+                          Not provided (Masked)
+                        </span>
+                      ) : f.neverAI ? (
+                        <span className="text-[10px] uppercase font-semibold text-amber-800 bg-amber-100 px-1.5 py-0.5 rounded">
+                          Official (Never AI)
+                        </span>
+                      ) : (
+                        <FieldSourceBadge source={f.source} />
+                      )}
+                    </div>
+
+                    <div className="flex items-center gap-2">
+                      {f.masked ? (
+                        <MaskedInput
+                          id={`missing-${f.key}`}
+                          value={(fieldEdits[f.key] as string) || ""}
+                          onChange={(val) => handleFieldChange(f.key, val)}
+                          placeholder={`Enter ${f.label.toLowerCase()}`}
+                          className="h-8 text-xs bg-amber-50/30"
+                        />
+                      ) : (
+                        <Input
+                          id={`missing-${f.key}`}
+                          value={(fieldEdits[f.key] as string) || ""}
+                          onChange={(e) => handleFieldChange(f.key, e.target.value)}
+                          onBlur={() => handleFieldBlur(f.key)}
+                          placeholder={`Enter ${f.label.toLowerCase()}`}
+                          className="h-8 text-xs bg-amber-50/30"
+                        />
+                      )}
+                      {f.suggestion && (
+                        <Button
+                          type="button"
+                          variant="secondary"
+                          size="sm"
+                          onClick={() => {
+                            handleFieldChange(f.key, f.suggestion!);
+                            handleFieldBlur(f.key);
+                          }}
+                          className="h-8 text-[11px] shrink-0 bg-blue-50 text-[#1F3A5F] hover:bg-blue-100 border border-blue-200"
+                          title="Accept suggested default"
+                        >
+                          Use: {f.suggestion}
+                        </Button>
+                      )}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
           </CardContent>
         </Card>
       )}
@@ -243,7 +383,7 @@ export default function ExtractionReviewPage({ params }: ReviewPageProps) {
         <div className="lg:col-span-7 space-y-6">
           <div className="flex items-center justify-between">
             <h2 className="text-base font-bold text-slate-900">Extracted Fields & Sources</h2>
-            <span className="text-xs text-slate-500">Auto-saves on exit</span>
+            <span className="text-xs text-slate-500">Auto-saves on field exit</span>
           </div>
 
           <div className="space-y-6">
@@ -256,7 +396,9 @@ export default function ExtractionReviewPage({ params }: ReviewPageProps) {
                 </CardHeader>
                 <CardContent className="p-4 space-y-4">
                   {fields.map((field) => {
-                    const isSensitive = field.sensitive;
+                    const isMasked = field.masked;
+                    const isNeverAI = field.neverAI;
+                    const isShared = field.shared;
                     const val = fieldEdits[field.key];
                     const isText = field.type === "text" || field.type === "number" || field.type === "date" || field.type === "time";
                     const isLong = field.type === "longtext";
@@ -267,12 +409,21 @@ export default function ExtractionReviewPage({ params }: ReviewPageProps) {
                           <Label htmlFor={`field-${field.key}`} className="text-xs font-semibold text-slate-800 flex items-center gap-1.5">
                             {field.label}
                             {field.required && <span className="text-red-500">*</span>}
+                            {isShared && (
+                              <span className="text-[10px] text-blue-700 bg-blue-50 border border-blue-200 px-1.5 py-0.2 rounded font-medium">
+                                Shared
+                              </span>
+                            )}
                           </Label>
                           <div className="flex items-center gap-2">
-                            {isSensitive ? (
-                              <span className="inline-flex items-center gap-1 text-[11px] font-medium text-slate-500 bg-slate-100 px-2 py-0.5 rounded">
+                            {isMasked ? (
+                              <span className="inline-flex items-center gap-1 text-[11px] font-medium text-slate-600 bg-slate-100 px-2 py-0.5 rounded">
                                 <Lock className="w-3 h-3 text-slate-400" />
-                                {field.userConfirmed ? "Confirmed by you" : "Not provided"}
+                                {field.userConfirmed ? "Provided by you (Masked)" : "Not provided"}
+                              </span>
+                            ) : isNeverAI ? (
+                              <span className="inline-flex items-center gap-1 text-[11px] font-medium text-amber-800 bg-amber-50 border border-amber-200 px-2 py-0.5 rounded">
+                                {field.userConfirmed ? "Confirmed by you" : "Official (Never AI)"}
                               </span>
                             ) : (
                               <FieldSourceBadge
@@ -288,7 +439,7 @@ export default function ExtractionReviewPage({ params }: ReviewPageProps) {
                           <p className="text-[11px] text-slate-500">{field.helpText}</p>
                         )}
 
-                        {isText && !isSensitive && (
+                        {isText && !isMasked && (
                           <Input
                             id={`field-${field.key}`}
                             type={field.type === "number" ? "number" : field.type === "date" ? "date" : field.type === "time" ? "time" : "text"}
@@ -300,7 +451,7 @@ export default function ExtractionReviewPage({ params }: ReviewPageProps) {
                           />
                         )}
 
-                        {isText && isSensitive && (
+                        {isText && isMasked && (
                           <MaskedInput
                             id={`field-${field.key}`}
                             value={(val as string) || ""}
