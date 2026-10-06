@@ -1,10 +1,16 @@
+import json
+import logging
+import os
 import re
-from datetime import datetime, date, timedelta
-from typing import Any, Dict, Tuple
+from datetime import date, datetime, timedelta
+from typing import Any, Dict, Optional, Tuple
+
+import httpx
+from pydantic import BaseModel, Field
 
 from app.config import settings
-import json
-import httpx
+
+logger = logging.getLogger(__name__)
 
 MONTHS = {
     "jan": 1, "feb": 2, "mar": 3, "apr": 4, "may": 5, "jun": 6,
@@ -13,7 +19,7 @@ MONTHS = {
 MONTH_RE = r"(jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|june?|july?|aug(?:ust)?|sept?(?:ember)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)"
 NUM_WORDS = {"one": 1, "two": 2, "three": 3, "four": 4, "five": 5}
 
-# Official & Sensitive field keys that must NEVER be populated by AI or extraction
+# Official & Sensitive field keys that must NEVER be populated by AI or extraction (Rule R1)
 OFFICIAL_FORBIDDEN_KEYS = {
     "ref_no",
     "approval_note_no",
@@ -31,112 +37,137 @@ OFFICIAL_FORBIDDEN_KEYS = {
     "ifsc",
     "payee_name",
     "mobile",
+    "contact_1_mobile",
+    "contact_2_mobile",
+    "contact_3_mobile",
     "signatures",
     "taxes",
 }
 
+AI_DRAFTABLE_KEYS = {"description", "objective"}
 
-def try_llm_extraction(text: str) -> Tuple[Dict[str, Any], Dict[str, float], Dict[str, str], str, Dict[str, bool]] | None:
-    """
-    Attempts extraction using Gemini or Anthropic if API keys are configured.
-    Enforces Rule R1 post-filter so official/financial details are NEVER populated.
-    """
-    prompt = f"""You are an event details extraction engine for college club documents.
-Extract the following information from the user's event announcement into valid JSON:
-- event_title: Name of event (string)
-- start_date: YYYY-MM-DD or null
-- end_date: YYYY-MM-DD or null
-- venue: Venue name or null
-- participants: Estimated number of attendees (e.g. "120" or "100+") or null
-- mode: "Offline" | "Online" | "Hybrid"
-- event_category: "workshop" | "hackathon" | "competition" | "seminar" | "talk" | "meeting" | "other"
-- description: A professional 2-3 sentence overview of the event
-- objective: A clear educational/technical objective statement
-- hasExpenses: boolean (true if snacks, banners, certificates, equipment, or prizes are expected)
-- hasPrizes: boolean (true if prizes/cash rewards are mentioned)
 
-CRITICAL RULE: DO NOT extract or invent official numbers, reference codes, bank accounts, IFSC, GST, phone numbers, or signatures.
+class FieldExtractionWithEvidence(BaseModel):
+    value: Optional[str] = None
+    evidence: Optional[str] = None
 
-Text:
+
+class LLMExtractionPayload(BaseModel):
+    event_title: Optional[FieldExtractionWithEvidence] = None
+    start_date: Optional[FieldExtractionWithEvidence] = None
+    end_date: Optional[FieldExtractionWithEvidence] = None
+    venue: Optional[FieldExtractionWithEvidence] = None
+    participants: Optional[FieldExtractionWithEvidence] = None
+    mode: Optional[FieldExtractionWithEvidence] = None
+    event_category: Optional[FieldExtractionWithEvidence] = None
+    faculty_coordinator: Optional[FieldExtractionWithEvidence] = None
+    description: Optional[str] = None
+    objective: Optional[str] = None
+    has_expenses: Optional[bool] = False
+    has_prizes: Optional[bool] = False
+
+
+def build_llm_prompt(text: str, missing_fields: list[str]) -> str:
+    fields_list = "\n".join(f"- {f}" for f in missing_fields)
+    return f"""You are an event details extraction engine for college club documents.
+The user provided the following announcement text:
 \"\"\"{text}\"\"\"
 
-Return ONLY valid JSON matching this schema, without code blocks or other text.
-"""
-    try:
-        if settings.GEMINI_API_KEY:
-            url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={settings.GEMINI_API_KEY}"
-            resp = httpx.post(
-                url,
-                json={"contents": [{"parts": [{"text": prompt}]}]},
-                timeout=10.0,
-            )
-            if resp.status_code == 200:
-                data = resp.json()
-                raw_out = data["candidates"][0]["content"]["parts"][0]["text"].strip()
-                if raw_out.startswith("```"):
-                    raw_out = re.sub(r"^```(?:json)?\s*", "", raw_out)
-                    raw_out = re.sub(r"\s*```$", "", raw_out)
-                parsed = json.loads(raw_out)
-                return _process_llm_result(parsed)
+We need to fill the following missing or low-confidence fields:
+{fields_list}
 
-        elif settings.ANTHROPIC_API_KEY:
-            url = "https://api.anthropic.com/v1/messages"
-            headers = {
-                "x-api-key": settings.ANTHROPIC_API_KEY,
-                "anthropic-version": "2023-06-01",
-                "content-type": "application/json",
-            }
-            resp = httpx.post(
-                url,
-                headers=headers,
-                json={
-                    "model": "claude-3-5-sonnet-20241022",
-                    "max_tokens": 1000,
-                    "messages": [{"role": "user", "content": prompt}],
-                },
-                timeout=10.0,
-            )
-            if resp.status_code == 200:
-                data = resp.json()
-                raw_out = data["content"][0]["text"].strip()
-                if raw_out.startswith("```"):
-                    raw_out = re.sub(r"^```(?:json)?\s*", "", raw_out)
-                    raw_out = re.sub(r"\s*```$", "", raw_out)
-                parsed = json.loads(raw_out)
-                return _process_llm_result(parsed)
-    except Exception:
-        # LLM failure or timeout -> silently proceed to robust regex engine
-        pass
+RULES:
+1. For each field (except description and objective), you MUST return an object:
+   {{"value": "<extracted value>", "evidence": "<exact verbatim quote from text>"}}
+   If the information is not explicitly stated in the text, return null for that field!
+2. Do NOT invent, assume, or guess any dates, venues, names, or participant counts.
+3. NEVER extract or invent official numbers, reference numbers, bank accounts, IFSC, GST, mobile numbers, or signatures. If present, ignore them.
+4. "description" and "objective" are AI drafts: provide a concise professional description and educational objective based on the context.
+5. "has_expenses": true if refreshments/printing/banners/purchases are mentioned, else false.
+6. "has_prizes": true if cash/prizes are mentioned, else false.
+
+Return ONLY a JSON object matching this schema:
+{{
+  "event_title": {{"value": "...", "evidence": "..."}} or null,
+  "start_date": {{"value": "YYYY-MM-DD", "evidence": "..."}} or null,
+  "end_date": {{"value": "YYYY-MM-DD", "evidence": "..."}} or null,
+  "venue": {{"value": "...", "evidence": "..."}} or null,
+  "participants": {{"value": "...", "evidence": "..."}} or null,
+  "mode": {{"value": "Offline" | "Online" | "Hybrid", "evidence": "..."}} or null,
+  "event_category": {{"value": "...", "evidence": "..."}} or null,
+  "faculty_coordinator": {{"value": "...", "evidence": "..."}} or null,
+  "description": "...",
+  "objective": "...",
+  "has_expenses": false,
+  "has_prizes": false
+}}
+"""
+
+
+def _call_llm_api(prompt: str) -> Optional[str]:
+    """
+    Calls Anthropic or Gemini using HTTP headers (NEVER query parameters for keys).
+    Reads model name from ANTHROPIC_MODEL env var.
+    Logs errors without including text content.
+    """
+    model_name = os.getenv("ANTHROPIC_MODEL", settings.ANTHROPIC_MODEL)
+    if settings.ANTHROPIC_API_KEY:
+        url = "https://api.anthropic.com/v1/messages"
+        headers = {
+            "x-api-key": settings.ANTHROPIC_API_KEY,
+            "anthropic-version": "2023-06-01",
+            "content-type": "application/json",
+        }
+        body = {
+            "model": model_name,
+            "max_tokens": 1024,
+            "messages": [{"role": "user", "content": prompt}],
+        }
+        resp = httpx.post(url, headers=headers, json=body, timeout=12.0)
+        if resp.status_code == 200:
+            data = resp.json()
+            return data["content"][0]["text"].strip()
+        else:
+            logger.error("Anthropic API returned status %s", resp.status_code)
+            return None
+
+    elif settings.GEMINI_API_KEY:
+        # Pass API key via header, NEVER in URL
+        url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent"
+        headers = {
+            "x-goog-api-key": settings.GEMINI_API_KEY,
+            "content-type": "application/json",
+        }
+        body = {"contents": [{"parts": [{"text": prompt}]}]}
+        resp = httpx.post(url, headers=headers, json=body, timeout=12.0)
+        if resp.status_code == 200:
+            data = resp.json()
+            return data["candidates"][0]["content"]["parts"][0]["text"].strip()
+        else:
+            logger.error("Gemini API returned status %s", resp.status_code)
+            return None
+
     return None
 
 
-def _process_llm_result(parsed: dict) -> Tuple[Dict[str, Any], Dict[str, float], Dict[str, str], str, Dict[str, bool]]:
-    values: Dict[str, Any] = {}
-    confidences: Dict[str, float] = {}
-    sources: Dict[str, str] = {}
-
-    for k, v in parsed.items():
-        if k in OFFICIAL_FORBIDDEN_KEYS:
-            continue
-        if v is not None and k not in ["hasExpenses", "hasPrizes", "event_category"]:
-            values[k] = v
-            confidences[k] = 0.92
-            sources[k] = "ai_draft" if k in ["description", "objective"] else "user_text"
-
-    category = parsed.get("event_category", "workshop")
-    flags = {
-        "hasExpenses": bool(parsed.get("hasExpenses", False)),
-        "hasPrizes": bool(parsed.get("hasPrizes", False)),
-    }
-
-    # Strict post-filter: strip forbidden keys
-    for forbidden in OFFICIAL_FORBIDDEN_KEYS:
-        values.pop(forbidden, None)
-        confidences.pop(forbidden, None)
-        sources.pop(forbidden, None)
-
-    return values, confidences, sources, category, flags
-
+def call_llm_with_retry(text: str, missing_fields: list[str]) -> Optional[LLMExtractionPayload]:
+    prompt = build_llm_prompt(text, missing_fields)
+    for attempt in range(2):  # Try initial + 1 retry on parse failure
+        try:
+            raw_response = _call_llm_api(prompt)
+            if not raw_response:
+                continue
+            # Strip markdown fences if present
+            cleaned = raw_response.strip()
+            if cleaned.startswith("```"):
+                cleaned = re.sub(r"^```(?:json)?\s*", "", cleaned)
+                cleaned = re.sub(r"\s*```$", "", cleaned)
+            parsed_json = json.loads(cleaned)
+            validated = LLMExtractionPayload.model_validate(parsed_json)
+            return validated
+        except Exception as e:
+            logger.error("LLM extraction attempt %d failed: %s", attempt + 1, type(e).__name__)
+    return None
 
 
 def guess_year(month: int, day: int) -> int:
@@ -165,18 +196,12 @@ def detect_category(text: str) -> str:
     return "other"
 
 
-def extract_from_text(text: str) -> Tuple[Dict[str, Any], Dict[str, float], Dict[str, str], str, Dict[str, bool]]:
-    if settings.GEMINI_API_KEY or settings.ANTHROPIC_API_KEY:
-        llm_result = try_llm_extraction(text)
-        if llm_result is not None:
-            return llm_result
-
+def parse_regex_first(text: str) -> Tuple[Dict[str, Any], Dict[str, float], Dict[str, str], str, Dict[str, bool]]:
     values: Dict[str, Any] = {}
     confidence: Dict[str, float] = {}
     sources: Dict[str, str] = {}
 
     def set_val(k: str, v: Any, conf: float, src: str = "user_text"):
-        # Enforce Rule R1: Never fabricate official data
         if k in OFFICIAL_FORBIDDEN_KEYS:
             return
         values[k] = v
@@ -198,7 +223,7 @@ def extract_from_text(text: str) -> Tuple[Dict[str, Any], Dict[str, float], Dict
             duration_days = NUM_WORDS.get(d.lower(), int(d) if d.isdigit() else 1)
         raw_title = title_m.group(2).strip()
         raw_title = re.sub(r"^(a|an|the)\s+", "", raw_title, flags=re.IGNORECASE)
-        set_val("event_title", raw_title.title(), 0.86)
+        set_val("event_title", raw_title.title(), 0.88)
     else:
         day_m = re.search(r"(one|two|three|four|five|\d+)[- ]day", clean, re.IGNORECASE)
         if day_m:
@@ -277,13 +302,93 @@ def extract_from_text(text: str) -> Tuple[Dict[str, Any], Dict[str, float], Dict
         ),
     }
 
-    # Post-filter verification: ensure no official forbidden keys leaked
+    # Strict post-filter: remove forbidden keys
     for forbidden in OFFICIAL_FORBIDDEN_KEYS:
-        if forbidden in values:
-            del values[forbidden]
-            if forbidden in confidence:
-                del confidence[forbidden]
-            if forbidden in sources:
-                del sources[forbidden]
+        values.pop(forbidden, None)
+        confidence.pop(forbidden, None)
+        sources.pop(forbidden, None)
 
     return values, confidence, sources, category, flags
+
+
+def extract_from_text(text: str) -> Tuple[Dict[str, Any], Dict[str, float], Dict[str, str], str, Dict[str, bool]]:
+    """
+    Primary extraction pipeline:
+    1. Runs parser FIRST.
+    2. Identifies fields still missing or low-confidence (<0.85).
+    3. If LLM is configured, calls LLM ONLY for missing/low-confidence fields.
+    4. Enforces strict evidence substring matching and Rule R1 forbidden keys.
+    """
+    values, confidence, sources, category, flags = parse_regex_first(text)
+
+    # Identify fields that are missing or low confidence
+    candidate_keys = ["event_title", "start_date", "end_date", "venue", "participants", "mode", "faculty_coordinator", "description", "objective"]
+    missing_or_low = [k for k in candidate_keys if k not in values or confidence.get(k, 0.0) < 0.85]
+
+    # Only call LLM if missing fields exist AND an API key is configured
+    if missing_or_low and (settings.ANTHROPIC_API_KEY or settings.GEMINI_API_KEY):
+        llm_payload = call_llm_with_retry(text, missing_or_low)
+        if llm_payload:
+            # Integrate validated LLM values
+            _apply_llm_payload(llm_payload, text, values, confidence, sources, flags)
+
+    # Final enforcement of Rule R1: Never fabricate official data
+    for forbidden in OFFICIAL_FORBIDDEN_KEYS:
+        values.pop(forbidden, None)
+        confidence.pop(forbidden, None)
+        sources.pop(forbidden, None)
+
+    return values, confidence, sources, category, flags
+
+
+def _apply_llm_payload(
+    llm: LLMExtractionPayload,
+    text: str,
+    values: Dict[str, Any],
+    confidence: Dict[str, float],
+    sources: Dict[str, str],
+    flags: Dict[str, bool],
+):
+    # Process structured fields with evidence
+    fields_with_evidence = {
+        "event_title": llm.event_title,
+        "start_date": llm.start_date,
+        "end_date": llm.end_date,
+        "venue": llm.venue,
+        "participants": llm.participants,
+        "mode": llm.mode,
+        "faculty_coordinator": llm.faculty_coordinator,
+    }
+
+    for key, item in fields_with_evidence.items():
+        if key in OFFICIAL_FORBIDDEN_KEYS:
+            continue
+        if not item or not item.value:
+            continue
+
+        # Drop any value whose evidence is not a substring of the input
+        if not item.evidence or item.evidence not in text:
+            logger.info("Dropping hallucinated field '%s': evidence not found in text", key)
+            continue
+
+        # Only overwrite if currently missing or lower confidence
+        if key not in values or confidence.get(key, 0.0) < 0.85:
+            values[key] = item.value
+            confidence[key] = 0.95
+            sources[key] = "user_text"
+
+    # Process AI-draftable fields
+    if llm.description and ("description" not in values or confidence.get("description", 0.0) < 0.85):
+        values["description"] = llm.description
+        confidence["description"] = 0.90
+        sources["description"] = "ai_draft"
+
+    if llm.objective and ("objective" not in values or confidence.get("objective", 0.0) < 0.85):
+        values["objective"] = llm.objective
+        confidence["objective"] = 0.90
+        sources["objective"] = "ai_draft"
+
+    if llm.has_expenses:
+        flags["hasExpenses"] = True
+    if llm.has_prizes:
+        flags["hasPrizes"] = True

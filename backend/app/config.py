@@ -25,6 +25,7 @@ class Settings(BaseSettings):
 
     # LLM & Dev settings
     ANTHROPIC_API_KEY: str | None = None
+    ANTHROPIC_MODEL: str = "claude-3-5-sonnet-20241022"
     GEMINI_API_KEY: str | None = None
     ENABLE_DEV_RESET: bool = False
 
