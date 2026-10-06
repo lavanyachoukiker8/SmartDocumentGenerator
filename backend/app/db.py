@@ -2,6 +2,7 @@ import json
 from sqlmodel import Session, SQLModel, create_engine, select
 from app.config import settings
 from app.models import (
+    AuditLogTable,
     ClubTable,
     CounterTable,
     DocumentTable,
@@ -9,6 +10,7 @@ from app.models import (
     EventFieldTable,
     EventTable,
     TemplateMetaTable,
+    UserTable,
 )
 
 engine = create_engine(
@@ -83,6 +85,10 @@ def seed_initial_data(session: Session):
             session.add(CounterTable(category=cat, counter=cnt))
 
     session.commit()
+
+    from app.auth import seed_default_users
+    seed_default_users(session)
+
 
 
 def init_db():

@@ -158,6 +158,18 @@ class ExtractedField(CamelModel):
     help_text: Optional[str] = None
     user_confirmed: Optional[bool] = None
     suggestion: Optional[str] = None
+    has_value: Optional[bool] = None
+
+
+class RevealRequest(CamelModel):
+    field_key: str
+
+
+class RevealResponse(CamelModel):
+    field_key: str
+    value: str
+    has_value: bool
+
 
 
 class DocumentRecommendation(CamelModel):

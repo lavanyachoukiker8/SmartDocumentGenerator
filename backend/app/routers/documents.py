@@ -2,23 +2,28 @@ import json
 import re
 from pathlib import Path
 from typing import Any, Dict, List, Optional
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
 from fastapi.responses import FileResponse
 from sqlmodel import Session, select
 from app.config import settings
-from app.crypto import decrypt_field, encrypt_field
+from app.crypto import decrypt_field, encrypt_field, mask_value
 from app.db import get_session
 from app.models import (
     DocumentTable,
     DocumentVersionTable,
     EventFieldTable,
     EventTable,
+    UserTable,
 )
+from app.auth import get_current_user_optional
+
 from app.schemas import (
     DocumentSummary,
     DocumentVersion,
     ExportFormat,
     GeneratedDocument,
+    RevealRequest,
+    RevealResponse,
     SaveDocumentResult,
     Status,
 )
@@ -26,8 +31,26 @@ from app.services.export import convert_docx_to_pdf
 from app.services.fill import render_docx_template
 from app.services.template_loader import get_template_by_id, load_templates_from_disk
 from app.utils import now_iso
+import uuid
 
 router = APIRouter(prefix="/documents", tags=["Documents"])
+
+
+def mask_doc_values(raw_dict: dict, template_id: str, session: Session) -> dict:
+    t = get_template_by_id(template_id, session)
+    masked_keys = set()
+    if t:
+        for p in t.placeholders:
+            if p.masked:
+                masked_keys.add(p.key)
+    out = dict(raw_dict)
+    for k in masked_keys:
+        raw_val = out.get(k)
+        if raw_val is not None and str(raw_val).strip():
+            plain = decrypt_field(str(raw_val))
+            out[k] = mask_value(plain)
+    return out
+
 
 
 def db_to_doc_schema(d: DocumentTable, session: Session) -> GeneratedDocument:
@@ -43,10 +66,12 @@ def db_to_doc_schema(d: DocumentTable, session: Session) -> GeneratedDocument:
             created_at=vr.created_at,
             author=vr.author,
             note=vr.note,
-            values=json.loads(vr.values_json),
+            values=mask_doc_values(json.loads(vr.values_json), d.template_id, session),
         )
         for vr in v_recs
     ]
+
+    stored_values = json.loads(d.values_json) if d.values_json else {}
 
     return GeneratedDocument(
         id=d.id,
@@ -57,13 +82,14 @@ def db_to_doc_schema(d: DocumentTable, session: Session) -> GeneratedDocument:
         title=d.title,
         status=d.status,
         current_version=d.current_version,
-        values=json.loads(d.values_json),
+        values=mask_doc_values(stored_values, d.template_id, session),
         versions=versions,
         created_at=d.created_at,
         updated_at=d.updated_at,
         out_of_sync=d.out_of_sync,
         has_placeholders=d.has_placeholders,
     )
+
 
 
 @router.get("", response_model=List[DocumentSummary])
@@ -138,20 +164,32 @@ def save_document(
     t = get_template_by_id(doc.template_id, session)
     old_values = json.loads(doc.values_json) if doc.values_json else {}
 
+    stored_new_values = dict(new_values)
+    if t:
+        for p in t.placeholders:
+            if p.masked and p.key in stored_new_values:
+                val = str(stored_new_values[p.key]) if stored_new_values[p.key] is not None else ""
+                if "•" in val:
+                    stored_new_values[p.key] = old_values.get(p.key, "")
+                elif val.strip():
+                    stored_new_values[p.key] = encrypt_field(val)
+                else:
+                    stored_new_values[p.key] = ""
+
     # Identify changed shared fields
     shared_keys = []
     updated_field_labels = []
     if t:
         for p in t.placeholders:
             if p.shared:
-                if str(new_values.get(p.key)) != str(old_values.get(p.key)):
+                if str(stored_new_values.get(p.key)) != str(old_values.get(p.key)):
                     shared_keys.append(p.key)
                     updated_field_labels.append(p.label)
 
     # Increment version
     v_num = doc.current_version + 1
     doc.current_version = v_num
-    doc.values_json = json.dumps(new_values)
+    doc.values_json = json.dumps(stored_new_values)
     doc.updated_at = now
     session.add(doc)
 
@@ -162,7 +200,7 @@ def save_document(
         created_at=now,
         author="User",
         note=note,
-        values_json=json.dumps(new_values),
+        values_json=json.dumps(stored_new_values),
     )
     session.add(ver)
 
@@ -170,24 +208,22 @@ def save_document(
     event = session.exec(select(EventTable).where(EventTable.id == doc.event_id)).first()
     if event and t:
         for p in t.placeholders:
-            if p.key in new_values:
+            if p.key in stored_new_values:
                 ef = session.exec(
                     select(EventFieldTable)
                     .where(EventFieldTable.event_id == doc.event_id)
                     .where(EventFieldTable.key == p.key)
                 ).first()
                 if ef:
-                    raw_val = str(new_values[p.key]) if new_values[p.key] is not None else None
-                    if raw_val and ef.masked:
-                        raw_val = encrypt_field(raw_val)
+                    raw_val = str(stored_new_values[p.key]) if stored_new_values[p.key] is not None else None
                     ef.raw_value = raw_val
                     ef.source = "user_text"
                     ef.user_confirmed = True
                     session.add(ef)
 
         # Update event title if modified
-        if "event_title" in new_values and new_values["event_title"]:
-            event.title = str(new_values["event_title"])
+        if "event_title" in stored_new_values and stored_new_values["event_title"]:
+            event.title = str(stored_new_values["event_title"])
             doc.event_title = event.title
             session.add(event)
 
@@ -246,6 +282,7 @@ def set_document_status(
     document_id: str,
     payload: dict,
     session: Session = Depends(get_session),
+    current_user: Optional[UserTable] = Depends(get_current_user_optional),
 ):
     doc = session.exec(select(DocumentTable).where(DocumentTable.id == document_id)).first()
     if not doc:
@@ -254,6 +291,12 @@ def set_document_status(
     status = payload.get("status")
     if status not in ["draft", "needs_info", "ready", "approved"]:
         raise HTTPException(status_code=400, detail="Invalid document status")
+
+    if status == "approved" and current_user and current_user.role == "member":
+        raise HTTPException(
+            status_code=403,
+            detail="Forbidden: member role cannot approve documents. Requires faculty or admin.",
+        )
 
     doc.status = status
     doc.updated_at = now_iso()
@@ -317,15 +360,31 @@ def export_document(
     document_id: str,
     format: str = Query("docx"),
     session: Session = Depends(get_session),
+    background_tasks: BackgroundTasks = BackgroundTasks(),
 ):
     doc = session.exec(select(DocumentTable).where(DocumentTable.id == document_id)).first()
     if not doc:
         raise HTTPException(status_code=404, detail="Document not found")
 
     values: Dict[str, Any] = json.loads(doc.values_json) if doc.values_json else {}
+    t = get_template_by_id(doc.template_id, session)
+    if t:
+        for p in t.placeholders:
+            if p.masked and p.key in values:
+                raw_v = values[p.key]
+                if raw_v is not None and str(raw_v).strip():
+                    values[p.key] = decrypt_field(str(raw_v))
 
     safe_title = re.sub(r"[^\w\d-]+", "_", doc.title).strip("_")
-    out_docx = settings.OUTPUTS_DIR / f"{safe_title}_v{doc.current_version}.docx"
+    unique_id = uuid.uuid4().hex[:8]
+    out_docx = settings.OUTPUTS_DIR / f"{safe_title}_{doc.id}_v{doc.current_version}_{unique_id}.docx"
+
+    def cleanup_file(path_to_clean: Path):
+        try:
+            if path_to_clean.exists():
+                path_to_clean.unlink()
+        except Exception:
+            pass
 
     try:
         render_docx_template(doc.template_id, values, out_docx)
@@ -335,6 +394,8 @@ def export_document(
     if format == "pdf":
         try:
             pdf_path = convert_docx_to_pdf(out_docx, settings.OUTPUTS_DIR)
+            background_tasks.add_task(cleanup_file, out_docx)
+            background_tasks.add_task(cleanup_file, pdf_path)
             filename = f"{safe_title}_v{doc.current_version}.pdf"
             headers = {
                 "Content-Disposition": f'attachment; filename="{filename}"; filename*=UTF-8\'\'{filename}'
@@ -344,13 +405,16 @@ def export_document(
                 filename=filename,
                 media_type="application/pdf",
                 headers=headers,
+                background=background_tasks,
             )
         except Exception as e:
+            cleanup_file(out_docx)
             raise HTTPException(
                 status_code=500,
                 detail=f"PDF export failed: {str(e)}. (Ensure LibreOffice is installed or use DOCX format).",
             )
 
+    background_tasks.add_task(cleanup_file, out_docx)
     filename = f"{safe_title}_v{doc.current_version}.docx"
     headers = {
         "Content-Disposition": f'attachment; filename="{filename}"; filename*=UTF-8\'\'{filename}'
@@ -360,4 +424,32 @@ def export_document(
         filename=filename,
         media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
         headers=headers,
+        background=background_tasks,
     )
+
+
+@router.post("/{document_id}/reveal", response_model=RevealResponse)
+@router.get("/{document_id}/reveal/{field_key}", response_model=RevealResponse)
+def reveal_document_field(
+    document_id: str,
+    field_key: Optional[str] = None,
+    payload: Optional[RevealRequest] = None,
+    session: Session = Depends(get_session),
+):
+    key = field_key or (payload.field_key if payload else "")
+    if not key:
+        raise HTTPException(status_code=400, detail="Field key required")
+    doc = session.exec(select(DocumentTable).where(DocumentTable.id == document_id)).first()
+    if not doc:
+        raise HTTPException(status_code=404, detail="Document not found")
+    stored_values = json.loads(doc.values_json) if doc.values_json else {}
+    if key not in stored_values:
+        raise HTTPException(status_code=404, detail=f"Field {key} not found in document")
+    raw = stored_values.get(key) or ""
+    plain = decrypt_field(str(raw)) if raw else ""
+    return RevealResponse(
+        field_key=key,
+        value=plain,
+        has_value=bool(plain and plain.strip()),
+    )
+

@@ -9,12 +9,21 @@ from fastapi.responses import FileResponse
 from sqlmodel import Session, select
 from app.config import settings
 from app.db import get_session
-from app.models import TemplateMetaTable
+from app.models import TemplateMetaTable, UserTable
+from app.auth import get_current_user_optional
 from app.schemas import NewTemplateInput, Placeholder, RecommendationRule, Template, TemplateAnalysis
 from app.services.template_loader import get_template_by_id, load_templates_from_disk
 from app.utils import now_iso
+import uuid
 
 router = APIRouter(prefix="/templates", tags=["Templates"])
+
+
+def sanitize_filename(filename: str) -> str:
+    base = Path(filename).name
+    clean = re.sub(r"[^\w\d.-]", "_", base).strip("._")
+    return clean or "uploaded_template"
+
 
 
 def guess_placeholder_meta(key: str) -> Placeholder:
@@ -71,8 +80,11 @@ async def analyze_template(
     schema_file: Optional[UploadFile] = File(None, alias="schema"),
 ):
     warnings: list[str] = []
-    # Save uploaded file temporarily to inspect placeholders
-    tmp_path = settings.DATA_DIR / f"temp_{file.filename}"
+    clean_filename = sanitize_filename(file.filename or "template.docx")
+    clean_schema_filename = sanitize_filename(schema_file.filename) if schema_file else None
+
+    # Save uploaded file temporarily to inspect placeholders using sanitized filename
+    tmp_path = settings.DATA_DIR / f"temp_{uuid.uuid4().hex}_{clean_filename}"
     try:
         content = await file.read()
         tmp_path.write_bytes(content)
@@ -100,9 +112,7 @@ async def analyze_template(
     detected = [guess_placeholder_meta(k) for k in detected_keys]
 
     # Optional YAML schema override
-    yaml_filename = None
     if schema_file:
-        yaml_filename = schema_file.filename
         try:
             schema_bytes = await schema_file.read()
             schema_dict = yaml.safe_load(schema_bytes)
@@ -118,7 +128,7 @@ async def analyze_template(
                         p.never_ai = yp.get("never_ai", p.never_ai)
                         p.masked = yp.get("masked", p.masked)
                         p.ai_draftable = yp.get("ai_draftable", p.ai_draftable)
-            warnings.append(f"Successfully applied schema from {schema_file.filename}.")
+            warnings.append(f"Successfully applied schema from {clean_schema_filename}.")
         except Exception as e:
             warnings.append(f"Could not parse schema YAML: {str(e)}")
 
@@ -131,8 +141,8 @@ async def analyze_template(
     ]
 
     return TemplateAnalysis(
-        file_name=file.filename,
-        yaml_file_name=yaml_filename,
+        file_name=clean_filename,
+        yaml_file_name=clean_schema_filename,
         detected=detected,
         suggested_rules=suggested_rules,
         warnings=warnings,
@@ -143,7 +153,13 @@ async def analyze_template(
 def create_template(
     payload: NewTemplateInput,
     session: Session = Depends(get_session),
+    current_user: Optional[UserTable] = Depends(get_current_user_optional),
 ):
+    if current_user and current_user.role == "member":
+        raise HTTPException(
+            status_code=403,
+            detail="Forbidden: member role cannot create templates. Requires admin or faculty.",
+        )
     safe_folder = re.sub(r"[^\w\d-]+", "_", payload.name.lower()).strip("_")
     t_dir = settings.TEMPLATES_DIR / safe_folder
     t_dir.mkdir(parents=True, exist_ok=True)
@@ -196,7 +212,13 @@ def update_template(
     template_id: str,
     payload: dict,
     session: Session = Depends(get_session),
+    current_user: Optional[UserTable] = Depends(get_current_user_optional),
 ):
+    if current_user and current_user.role == "member":
+        raise HTTPException(
+            status_code=403,
+            detail="Forbidden: member role cannot edit templates. Requires admin or faculty.",
+        )
     t_dir = settings.TEMPLATES_DIR / template_id
     if not t_dir.exists():
         t_dir = settings.TEMPLATES_DIR / template_id.replace("-", "_")

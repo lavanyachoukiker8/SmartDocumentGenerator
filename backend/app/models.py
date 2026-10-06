@@ -117,3 +117,13 @@ class AuditLogTable(SQLModel, table=True):
     resource_type: str
     resource_id: str
     detail: str
+
+
+class UserTable(SQLModel, table=True):
+    __tablename__ = "user"
+    id: str = Field(primary_key=True)
+    username: str = Field(unique=True, index=True)
+    password_hash: str
+    role: str = "member"  # admin, member, faculty
+    full_name: str = ""
+

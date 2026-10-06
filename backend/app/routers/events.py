@@ -24,6 +24,8 @@ from app.schemas import (
     GenerateOptions,
     GeneratedDocument,
     Placeholder,
+    RevealRequest,
+    RevealResponse,
     Status,
 )
 from app.services.extractor import extract_from_text
@@ -51,12 +53,11 @@ def db_to_event_schema(e: EventTable, fields: List[EventFieldTable], doc_ids: Li
     for f in fields:
         raw = f.raw_value
         val = raw
+        has_val = bool(raw and str(raw).strip())
         if raw is not None:
-            if f.masked and not f.user_confirmed:
+            if f.masked:
                 plain = decrypt_field(raw)
                 val = mask_value(plain)
-            elif f.masked and f.user_confirmed:
-                val = decrypt_field(raw)
             elif f.field_type == "table":
                 try:
                     val = json.loads(raw)
@@ -83,6 +84,7 @@ def db_to_event_schema(e: EventTable, fields: List[EventFieldTable], doc_ids: Li
                 shared=f.shared,
                 user_confirmed=f.user_confirmed,
                 suggestion=f.suggestion,
+                has_value=has_val,
                 options=opts,
                 columns=cols,
             )
@@ -518,7 +520,14 @@ def generate_documents(
                     ef.user_confirmed = True
                     session.add(ef)
 
-        doc_values = {p.key: val_map.get(p.key) for p in t.placeholders}
+        doc_values = {}
+        for p in t.placeholders:
+            v = val_map.get(p.key)
+            if v is not None and str(v).strip() and p.masked:
+                doc_values[p.key] = encrypt_field(str(v))
+            else:
+                doc_values[p.key] = v
+
 
         # Check if document already exists
         existing = session.exec(
@@ -640,3 +649,31 @@ def regenerate_from_event(event_id: str, session: Session = Depends(get_session)
     docs = session.exec(select(DocumentTable).where(DocumentTable.event_id == event_id)).all()
     t_ids = [d.template_id for d in docs]
     return generate_documents(event_id, {"templateIds": t_ids, "options": {"allowPlaceholders": True}}, session)
+
+
+@router.post("/{event_id}/reveal", response_model=RevealResponse)
+@router.get("/{event_id}/reveal/{field_key}", response_model=RevealResponse)
+def reveal_event_field(
+    event_id: str,
+    field_key: Optional[str] = None,
+    payload: Optional[RevealRequest] = None,
+    session: Session = Depends(get_session),
+):
+    key = field_key or (payload.field_key if payload else "")
+    if not key:
+        raise HTTPException(status_code=400, detail="Field key required")
+    ef = session.exec(
+        select(EventFieldTable)
+        .where(EventFieldTable.event_id == event_id)
+        .where(EventFieldTable.key == key)
+    ).first()
+    if not ef:
+        raise HTTPException(status_code=404, detail=f"Field {key} not found for event")
+    raw = ef.raw_value or ""
+    plain = decrypt_field(raw) if (ef.masked and raw) else raw
+    return RevealResponse(
+        field_key=key,
+        value=plain,
+        has_value=bool(plain and plain.strip()),
+    )
+

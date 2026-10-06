@@ -1,5 +1,6 @@
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 from sqlmodel import Session, select
+from app.config import settings
 from app.db import get_session, seed_initial_data
 from app.models import (
     ClubTable,
@@ -52,6 +53,11 @@ def get_stats(session: Session = Depends(get_session)):
 
 @router.post("/reset")
 def reset_db(session: Session = Depends(get_session)):
+    if not settings.ENABLE_DEV_RESET:
+        raise HTTPException(
+            status_code=403,
+            detail="Reset endpoint is disabled in this environment. Set ENABLE_DEV_RESET=true to enable.",
+        )
     # Clear tables
     for model in [DocumentVersionTable, DocumentTable, EventFieldTable, EventTable, CounterTable, ClubTable]:
         session.exec(select(model))

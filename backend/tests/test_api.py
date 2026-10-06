@@ -127,9 +127,21 @@ def test_stats_and_reset():
     assert "totalEvents" in stats
     assert "totalDocuments" in stats
 
-    reset_res = client.post("/api/reset")
-    assert reset_res.status_code == 200
-    assert reset_res.json()["status"] == "ok"
+    # Guard: should be 403 when ENABLE_DEV_RESET=False
+    from app.config import settings
+    settings.ENABLE_DEV_RESET = False
+    forbidden_res = client.post("/api/reset")
+    assert forbidden_res.status_code == 403
+
+    # Should succeed when ENABLE_DEV_RESET=True
+    settings.ENABLE_DEV_RESET = True
+    try:
+        reset_res = client.post("/api/reset")
+        assert reset_res.status_code == 200
+        assert reset_res.json()["status"] == "ok"
+    finally:
+        settings.ENABLE_DEV_RESET = False
+
 
 
 def test_extracted_logos():
