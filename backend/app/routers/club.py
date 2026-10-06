@@ -73,7 +73,15 @@ def peek_reference(
     if not fmt:
         raise HTTPException(status_code=404, detail=f"Reference format for {category} not found")
 
-    next_seq = fmt["counter"] + 1
+    year = club.financial_year or "26-27"
+    counter_row = session.exec(
+        select(CounterTable)
+        .where(CounterTable.category == category)
+        .where(CounterTable.year == year)
+    ).first()
+    last_seq = counter_row.last_seq if counter_row else fmt.get("counter", 0)
+    next_seq = last_seq + 1
+
     ref = format_reference(
         fmt["pattern"],
         next_seq,
@@ -100,17 +108,17 @@ def reserve_reference(
     if not fmt:
         raise HTTPException(status_code=404, detail=f"Reference format for {category} not found")
 
-    fmt["counter"] += 1
-    club.reference_formats_json = json.dumps(formats)
-    session.add(club)
-    session.commit()
+    year = club.financial_year or "26-27"
+    from app.services.reference import reserve_reference_sequence
+    seq = reserve_reference_sequence(category, year, session)
 
     ref = format_reference(
         fmt["pattern"],
-        fmt["counter"],
+        seq,
         club.financial_year,
         club.academic_year,
         club.short_name,
         eventCode,
     )
     return ref
+

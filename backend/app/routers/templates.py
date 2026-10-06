@@ -11,7 +11,7 @@ from app.config import settings
 from app.db import get_session
 from app.models import TemplateMetaTable, UserTable
 from app.auth import get_current_user_optional
-from app.schemas import NewTemplateInput, Placeholder, RecommendationRule, Template, TemplateAnalysis
+from app.schemas import NewTemplateInput, Placeholder, RecommendationRule, TableColumn, Template, TemplateAnalysis
 from app.services.template_loader import get_template_by_id, load_templates_from_disk
 from app.utils import now_iso
 import uuid
@@ -25,25 +25,90 @@ def sanitize_filename(filename: str) -> str:
     return clean or "uploaded_template"
 
 
-
-def guess_placeholder_meta(key: str) -> Placeholder:
+def infer_placeholder_meta(key: str) -> Placeholder:
     label = key.replace("_", " ").title()
-    is_secret = bool(re.search(r"bank|ifsc|gst|mobile|account", key, re.IGNORECASE))
-    is_official = bool(re.search(r"ref_no|approval|invoice|purchase|head_of_account|date", key, re.IGNORECASE))
-    is_draft = bool(re.search(r"description|objective|subject", key, re.IGNORECASE))
-    f_type = "date" if "date" in key else "number" if re.search(r"cost|amount|total|qty|count", key) else "longtext" if is_draft else "text"
+    is_secret = bool(re.search(r"bank|gst|mobile|account", key, re.IGNORECASE))
+    is_official = bool(re.search(r"ref(?:_no)?|approval|date|signatory", key, re.IGNORECASE))
+    is_draft = bool(re.search(r"description|objective", key, re.IGNORECASE))
+    is_num = bool(re.search(r"amount|qty|cost|total", key, re.IGNORECASE))
+    is_date = bool(re.search(r"date", key, re.IGNORECASE))
+
+    f_type = "date" if is_date else "number" if is_num else "longtext" if is_draft else "text"
 
     return Placeholder(
         key=key,
         label=label,
         type=f_type,
-        required=not bool(re.search(r"optional|note|remark|end_date", key)),
+        required=True,
         question=f"What is the {label.lower()}?",
         never_ai=is_secret or is_official,
         masked=is_secret,
         ai_draftable=is_draft and not (is_secret or is_official),
         section="General",
     )
+
+
+def scan_docx_elements(doc: Document) -> tuple[list[str], dict[str, list[TableColumn]]]:
+    raw_texts: list[str] = []
+    tables_detected: dict[str, list[TableColumn]] = {}
+
+    def process_table(tbl):
+        loop_var = None
+        table_key = None
+        for row in tbl.rows:
+            row_str = " ".join([c.text for c in row.cells])
+            raw_texts.append(row_str)
+            m = re.search(r"{%\s*(?:tr\s+)?for\s+([a-zA-Z_]\w*)\s+in\s+([a-zA-Z_]\w*)\s*%}", row_str)
+            if m:
+                loop_var = m.group(1)
+                table_key = m.group(2)
+                if table_key not in tables_detected:
+                    tables_detected[table_key] = []
+
+        if loop_var and table_key:
+            seen_cols = set()
+            for row in tbl.rows:
+                for c in row.cells:
+                    col_pat = r"\{\{\s*" + re.escape(loop_var) + r"\.([a-zA-Z_]\w*).*?\}\}"
+                    col_matches = re.findall(col_pat, c.text)
+                    for col_name in col_matches:
+                        if col_name not in seen_cols:
+                            seen_cols.add(col_name)
+                            col_label = col_name.replace("_", " ").title()
+                            is_num = bool(re.search(r"amount|qty|cost|total|price", col_name, re.I))
+                            is_secret = bool(re.search(r"bank|gst|mobile|account", col_name, re.I))
+                            is_official = bool(re.search(r"ref_no|approval|date|signatory", col_name, re.I))
+                            tables_detected[table_key].append(
+                                TableColumn(
+                                    key=col_name,
+                                    label=col_label,
+                                    type="number" if is_num else "text",
+                                    required=True,
+                                    never_ai=is_secret or is_official,
+                                    masked=is_secret,
+                                )
+                            )
+
+    # 1. Body paragraphs
+    for p in doc.paragraphs:
+        raw_texts.append(p.text)
+
+    # 2. Body tables
+    for tbl in doc.tables:
+        process_table(tbl)
+
+    # 3. Headers and Footers
+    for s in doc.sections:
+        for p in s.header.paragraphs:
+            raw_texts.append(p.text)
+        for tbl in s.header.tables:
+            process_table(tbl)
+        for p in s.footer.paragraphs:
+            raw_texts.append(p.text)
+        for tbl in s.footer.tables:
+            process_table(tbl)
+
+    return raw_texts, tables_detected
 
 
 @router.get("", response_model=List[Template])
@@ -83,33 +148,53 @@ async def analyze_template(
     clean_filename = sanitize_filename(file.filename or "template.docx")
     clean_schema_filename = sanitize_filename(schema_file.filename) if schema_file else None
 
-    # Save uploaded file temporarily to inspect placeholders using sanitized filename
     tmp_path = settings.DATA_DIR / f"temp_{uuid.uuid4().hex}_{clean_filename}"
+    detected: list[Placeholder] = []
+
     try:
         content = await file.read()
         tmp_path.write_bytes(content)
         doc = Document(str(tmp_path))
 
-        raw_text = "\n".join([p.text for p in doc.paragraphs])
-        for tbl in doc.tables:
-            for row in tbl.rows:
-                raw_text += "\n" + " ".join([c.text for c in row.cells])
+        raw_texts, tables_detected = scan_docx_elements(doc)
+        full_text = "\n".join(raw_texts)
 
-        # Match {{ placeholder }} or {% for ... %}
-        matches = re.findall(r"\{\{\s*([a-zA-Z_]\w*).*?\}\}", raw_text)
-        detected_keys = sorted(list(set(matches)))
+        # 1. Add table placeholders
+        for tbl_key, cols in tables_detected.items():
+            tbl_label = tbl_key.replace("_", " ").title()
+            detected.append(
+                Placeholder(
+                    key=tbl_key,
+                    label=tbl_label,
+                    type="table",
+                    required=True,
+                    question=f"Please provide the {tbl_label.lower()} entries.",
+                    never_ai=False,
+                    masked=False,
+                    ai_draftable=False,
+                    section="Details",
+                    columns=cols,
+                )
+            )
+
+        # 2. Extract scalar placeholders {{ key }}
+        scalar_matches = re.findall(r"\{\{\s*([a-zA-Z_]\w*).*?\}\}", full_text)
+        detected_scalar_keys = [
+            k for k in sorted(list(set(scalar_matches)))
+            if k not in tables_detected and not k.startswith("loop") and k not in ["for", "endfor", "if", "endif"]
+        ]
+
+        for k in detected_scalar_keys:
+            detected.append(infer_placeholder_meta(k))
+
     except Exception as e:
-        warnings.append(f"Could not read docx: {str(e)}. Providing fallback fields.")
-        detected_keys = ["event_title", "start_date", "venue", "description", "faculty_coordinator"]
+        warnings.append(f"Could not read docx: {str(e)}.")
     finally:
         if tmp_path.exists():
             tmp_path.unlink()
 
-    if not detected_keys:
-        warnings.append("No {{ placeholders }} detected. Using standard document placeholders.")
-        detected_keys = ["event_title", "start_date", "venue", "description", "faculty_coordinator"]
-
-    detected = [guess_placeholder_meta(k) for k in detected_keys]
+    if not detected:
+        warnings.append("No placeholders detected in document.")
 
     # Optional YAML schema override
     if schema_file:

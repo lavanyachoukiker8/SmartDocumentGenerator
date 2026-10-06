@@ -32,26 +32,42 @@ def load_templates_from_disk(session: Session) -> List[Template]:
         if not docx_path.exists():
             continue
 
+        tpl_error: Optional[str] = None
+        tpl_warnings: List[str] = []
+
         meta = {}
         if meta_path.exists():
             try:
                 meta = yaml.safe_load(meta_path.read_text(encoding="utf-8")) or {}
-            except Exception:
-                pass
+            except Exception as e:
+                tpl_warnings.append(f"Invalid YAML in meta.yaml: {str(e)}")
 
         schema = {}
-        if schema_path.exists():
+        if not schema_path.exists():
+            tpl_error = f"Missing schema.yaml in '{item.name}'"
+        else:
             try:
                 schema = yaml.safe_load(schema_path.read_text(encoding="utf-8")) or {}
-            except Exception:
-                pass
+                if not isinstance(schema, dict) or "placeholders" not in schema:
+                    tpl_error = f"Invalid schema structure in '{item.name}/schema.yaml'"
+            except Exception as e:
+                tpl_error = f"Invalid YAML in '{item.name}/schema.yaml': {str(e)}"
 
         rules_data = {}
         if rules_path.exists():
             try:
                 rules_data = yaml.safe_load(rules_path.read_text(encoding="utf-8")) or {}
-            except Exception:
-                pass
+            except Exception as e:
+                tpl_warnings.append(f"Invalid YAML in rules.yaml: {str(e)}")
+
+        # Validate rule expressions and collect warnings
+        from app.services.rules import validate_rule_condition
+        for r_dict in rules_data.get("rules", []):
+            cond = r_dict.get("condition", "")
+            if cond:
+                err = validate_rule_condition(cond)
+                if err:
+                    tpl_warnings.append(f"Rule '{r_dict.get('id', 'rule')}' has invalid expression: {err}")
 
         t_id = meta.get("id", item.name.replace("_", "-"))
         name = meta.get("name", item.name.replace("_", " ").title())
@@ -62,14 +78,14 @@ def load_templates_from_disk(session: Session) -> List[Template]:
         file_name = meta.get("file_name", f"{item.name}.docx")
         version = meta.get("version", 1)
 
-        placeholders_raw = schema.get("placeholders", [])
+        placeholders_raw = schema.get("placeholders", []) if isinstance(schema, dict) else []
         placeholders = []
         for p in placeholders_raw:
             if not p.get("question"):
                 p["question"] = f"What is the {p.get('label', p.get('key', 'field'))}?"
             placeholders.append(Placeholder(**p))
 
-        rules_raw = rules_data.get("rules", [])
+        rules_raw = rules_data.get("rules", []) if isinstance(rules_data, dict) else []
         rules = [RecommendationRule(**r) for r in rules_raw]
 
         # Check DB for usage count and updates
@@ -108,10 +124,13 @@ def load_templates_from_disk(session: Session) -> List[Template]:
                 placeholders=placeholders,
                 rules=rules,
                 usage_count=db_meta.usage_count,
+                warnings=tpl_warnings,
+                error=tpl_error,
             )
         )
 
     return templates_out
+
 
 
 def get_template_by_id(t_id: str, session: Session) -> Optional[Template]:

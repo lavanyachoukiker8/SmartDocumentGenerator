@@ -298,6 +298,29 @@ def set_document_status(
             detail="Forbidden: member role cannot approve documents. Requires faculty or admin.",
         )
 
+    if status == "approved":
+        # Reserve reference number only on approval, exactly once per document
+        from app.services.reference import reserve_document_reference
+        doc_vals = json.loads(doc.values_json) if doc.values_json else {}
+        curr_ref = doc_vals.get("ref_no")
+        if not curr_ref or curr_ref == "[TO BE FILLED]" or not str(curr_ref).strip():
+            event = session.exec(select(EventTable).where(EventTable.id == doc.event_id)).first()
+            event_cat = event.category if event else "general"
+            new_ref = reserve_document_reference(doc.template_id, event_cat, session)
+            if new_ref:
+                doc_vals["ref_no"] = new_ref
+                doc.values_json = json.dumps(doc_vals)
+                ef = session.exec(
+                    select(EventFieldTable)
+                    .where(EventFieldTable.event_id == doc.event_id)
+                    .where(EventFieldTable.key == "ref_no")
+                ).first()
+                if ef:
+                    ef.raw_value = new_ref
+                    ef.source = "club_profile"
+                    ef.user_confirmed = True
+                    session.add(ef)
+
     doc.status = status
     doc.updated_at = now_iso()
     session.add(doc)

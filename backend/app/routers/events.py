@@ -417,13 +417,20 @@ def get_recommendations(event_id: str, session: Session = Depends(get_session)):
     recs: List[DocumentRecommendation] = []
     for t in templates:
         rule_matched = False
-        reason = "Template available for this event."
+        reasons: List[str] = []
         if t.rules:
-            r = t.rules[0]
-            rule_matched = eval_rule_safe(r.condition, context)
-            reason = r.description if rule_matched else "Not typically required for this event category."
+            for r in t.rules:
+                if eval_rule_safe(r.condition, context):
+                    reasons.append(r.description)
+            if reasons:
+                rule_matched = True
+                reason = " | ".join(reasons)
+            else:
+                rule_matched = False
+                reason = "Not typically required based on current event details."
         else:
             rule_matched = True
+            reason = "Template available for all club events."
 
         missing_keys = [
             p.key for p in t.placeholders
@@ -491,34 +498,7 @@ def generate_documents(
                 detail=f"Template {t.name} is missing required fields: {', '.join(missing_req)}",
             )
 
-        # Check reference format reservation
-        if t.ref_category and not val_map.get("ref_no") and club:
-            formats = json.loads(club.reference_formats_json)
-            fmt = next((f for f in formats if f["category"] == t.ref_category), None)
-            if fmt:
-                fmt["counter"] += 1
-                club.reference_formats_json = json.dumps(formats)
-                session.add(club)
-                ref = format_reference(
-                    fmt["pattern"],
-                    fmt["counter"],
-                    club.financial_year,
-                    club.academic_year,
-                    club.short_name,
-                    event.category.upper(),
-                )
-                val_map["ref_no"] = ref
-                # Also mirror back to event field
-                ef = session.exec(
-                    select(EventFieldTable)
-                    .where(EventFieldTable.event_id == event_id)
-                    .where(EventFieldTable.key == "ref_no")
-                ).first()
-                if ef:
-                    ef.raw_value = ref
-                    ef.source = "user_text"
-                    ef.user_confirmed = True
-                    session.add(ef)
+        # Reference numbers are reserved only upon approval, not during generation/draft preview (Rule Item 14)
 
         doc_values = {}
         for p in t.placeholders:

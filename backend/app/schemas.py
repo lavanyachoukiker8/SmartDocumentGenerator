@@ -118,6 +118,9 @@ class Template(CamelModel):
     placeholders: List[Placeholder]
     rules: List[RecommendationRule]
     usage_count: int = 0
+    warnings: List[str] = []
+    error: Optional[str] = None
+
 
 
 class TemplateAnalysis(CamelModel):

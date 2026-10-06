@@ -82,7 +82,7 @@ def seed_initial_data(session: Session):
 
         # Initialize counters
         for cat, cnt in [("ROOM", 9), ("BILL", 3), ("GEN", 5)]:
-            session.add(CounterTable(category=cat, counter=cnt))
+            session.add(CounterTable(category=cat, year="26-27", last_seq=cnt))
 
     session.commit()
 
@@ -92,9 +92,20 @@ def seed_initial_data(session: Session):
 
 
 def init_db():
+    from sqlalchemy import text
+    with engine.connect() as conn:
+        try:
+            res = conn.execute(text("PRAGMA table_info(counter)")).fetchall()
+            col_names = [r[1] for r in res]
+            if col_names and "year" not in col_names:
+                conn.execute(text("DROP TABLE counter"))
+                conn.commit()
+        except Exception:
+            pass
     SQLModel.metadata.create_all(engine)
     with Session(engine) as session:
         seed_initial_data(session)
+
 
 
 def reset_database():

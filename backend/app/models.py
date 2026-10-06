@@ -105,7 +105,9 @@ class TemplateMetaTable(SQLModel, table=True):
 class CounterTable(SQLModel, table=True):
     __tablename__ = "counter"
     category: str = Field(primary_key=True)
-    counter: int = 0
+    year: str = Field(primary_key=True)
+    last_seq: int = Field(default=0)
+
 
 
 class AuditLogTable(SQLModel, table=True):
