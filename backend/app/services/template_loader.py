@@ -63,7 +63,11 @@ def load_templates_from_disk(session: Session) -> List[Template]:
         version = meta.get("version", 1)
 
         placeholders_raw = schema.get("placeholders", [])
-        placeholders = [Placeholder(**p) for p in placeholders_raw]
+        placeholders = []
+        for p in placeholders_raw:
+            if not p.get("question"):
+                p["question"] = f"What is the {p.get('label', p.get('key', 'field'))}?"
+            placeholders.append(Placeholder(**p))
 
         rules_raw = rules_data.get("rules", [])
         rules = [RecommendationRule(**r) for r in rules_raw]

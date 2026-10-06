@@ -1,9 +1,9 @@
 id: bill-summary
-name: Bill Summary & Prize Reimbursement
+name: Bill Summary & Reimbursement Sheet
 short_name: Bill Summary
-description: Summary sheet for multiple individual reimbursements, winners prize money,
-  and account breakdowns.
-authority: Accounts Section / DSW
+description: Consolidated reimbursement summary with payment breakdown, other accounts
+  table, and club signatories.
+authority: Dean (Student Welfare)
 ref_category: BILL
 file_name: bill_summary.docx
-version: 1
+version: 2

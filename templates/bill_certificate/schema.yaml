@@ -1,119 +1,255 @@
 placeholders:
+- key: chapter_name
+  label: Chapter Name
+  type: text
+  required: true
+  never_ai: false
+  masked: false
+  section: General
+- key: chapter_code
+  label: Chapter Code No.
+  type: text
+  required: true
+  never_ai: false
+  masked: false
+  section: General
 - key: approval_note_no
   label: Approval Note No.
   type: text
   required: true
   never_ai: true
   masked: false
-  question: Official approval note reference
-  section: Approval
+  section: Approval Details
 - key: approval_date
   label: Approval Date
   type: date
   required: true
   never_ai: true
   masked: false
-  question: Date of approval note
-  section: Approval
-- key: head_of_account
-  label: Head of Account
+  section: Approval Details
+- key: bill_no
+  label: Bill No.
   type: text
   required: true
   never_ai: true
   masked: false
-  question: Budget head code (e.g. 6/52)
-  section: Approval
-- key: event_title
-  label: Event Title
-  type: text
+  section: Invoice
+- key: bill_date
+  label: Bill Date
+  type: date
   required: true
-  never_ai: false
+  never_ai: true
   masked: false
-  shared: true
-  question: Event title
-  section: Event Details
-- key: items
-  label: Purchased Items
-  type: table
+  section: Invoice
+- key: bill_amount
+  label: Bill Amount (Rs.)
+  type: number
   required: true
-  never_ai: false
+  never_ai: true
   masked: false
-  question: Bill items and quantities
-  section: Items & Bills
-  columns:
-  - key: name
-    label: Item Name
-    type: text
-  - key: qty
-    label: Qty
-    type: number
-  - key: unit_cost
-    label: Unit Cost
-    type: number
-  - key: total
-    label: Total
-    type: number
+  section: Invoice
 - key: supplier_name
   label: Supplier Name
   type: text
   required: true
   never_ai: false
   masked: false
-  question: Name of vendor or supplier
-  section: Vendor Details
-- key: supplier_gst
-  label: Supplier GST
-  type: text
-  required: false
-  never_ai: true
-  masked: true
-  question: Vendor GST Number
-  section: Vendor Details
-- key: invoice_no
-  label: Invoice No.
+  section: Supplier Details
+- key: purchase_order
+  label: Purchase Order No. & Date
   type: text
   required: true
   never_ai: true
   masked: false
-  question: Vendor bill or invoice number
-  section: Vendor Details
+  section: Approval Details
+- key: head_of_account
+  label: Head of Account (Code No.)
+  type: text
+  required: true
+  never_ai: true
+  masked: false
+  section: Approval Details
+- key: advance_drawn
+  label: Advance Drawn in Rs.
+  type: text
+  required: true
+  never_ai: true
+  masked: false
+  section: Approval Details
+- key: certifying_person
+  label: Certifying Person Name
+  type: text
+  required: true
+  never_ai: false
+  masked: false
+  section: Certification
+- key: items
+  label: Purchased Items
+  type: table
+  required: true
+  never_ai: true
+  masked: false
+  section: Itemized Expenses
+  columns:
+  - key: sr_no
+    label: Sr No.
+    type: number
+  - key: item_name
+    label: Item Name
+    type: text
+  - key: qty
+    label: Qty
+    type: number
+  - key: unit_cost
+    label: Unit Cost (Rs.)
+    type: number
+  - key: total
+    label: Total Cost (Rs.)
+    type: number
+- key: total_amount
+  label: Total Amount (Rs.)
+  type: number
+  required: false
+  never_ai: true
+  masked: false
+  section: Itemized Expenses
+- key: taxes
+  label: Taxes / Other Charges (Rs.)
+  type: number
+  required: false
+  never_ai: true
+  masked: false
+  section: Itemized Expenses
+- key: grand_total
+  label: Grand Total Amount (Rs.)
+  type: number
+  required: false
+  never_ai: true
+  masked: false
+  section: Itemized Expenses
+- key: supplier_gst
+  label: Supplier GST No.
+  type: text
+  required: true
+  never_ai: true
+  masked: true
+  section: Supplier Details
+- key: other_taxes
+  label: Any Other Taxes
+  type: text
+  required: false
+  never_ai: false
+  masked: false
+  section: Supplier Details
+- key: invoice_no
+  label: Invoice Number
+  type: text
+  required: true
+  never_ai: true
+  masked: false
+  section: Supplier Details
 - key: invoice_date
   label: Invoice Date
   type: date
   required: true
   never_ai: true
   masked: false
-  question: Date on the invoice
-  section: Vendor Details
+  section: Supplier Details
+- key: payee_name
+  label: Party / Payee Name
+  type: text
+  required: true
+  never_ai: false
+  masked: false
+  section: Payment Details
 - key: account_number
   label: Bank Account Number
   type: text
   required: true
   never_ai: true
   masked: true
-  question: Bank account number for payment
-  section: Bank Details
+  section: Payment Details
+- key: account_holder
+  label: Account Holder Name
+  type: text
+  required: true
+  never_ai: false
+  masked: false
+  section: Payment Details
 - key: bank_name
   label: Bank Name
   type: text
   required: true
   never_ai: false
   masked: false
-  question: Name of payee bank
-  section: Bank Details
+  section: Payment Details
 - key: bank_branch
   label: Bank Branch
   type: text
-  required: false
+  required: true
   never_ai: false
   masked: false
-  question: Bank branch name
-  section: Bank Details
+  section: Payment Details
 - key: ifsc
   label: IFSC Code
   type: text
   required: true
   never_ai: true
   masked: true
-  question: Bank IFSC Code
-  section: Bank Details
+  section: Payment Details
+- key: stock_office
+  label: Laboratory / Office Name
+  type: text
+  required: true
+  never_ai: false
+  masked: false
+  section: Stock Entry
+- key: stock_register_type
+  label: Register Name/Type
+  type: text
+  required: false
+  never_ai: false
+  masked: false
+  section: Stock Entry
+- key: stock_serial_no
+  label: Stock Serial Number
+  type: text
+  required: false
+  never_ai: false
+  masked: false
+  section: Stock Entry
+- key: stock_page_no
+  label: Stock Page Number
+  type: text
+  required: false
+  never_ai: false
+  masked: false
+  section: Stock Entry
+- key: stock_date
+  label: Stock Entry Date
+  type: date
+  required: false
+  never_ai: false
+  masked: false
+  section: Stock Entry
+- key: faculty_chairman_name
+  label: Faculty Chairman Name
+  type: text
+  required: true
+  never_ai: false
+  masked: false
+  section: Indenter Details
+- key: faculty_chairman_designation
+  label: Faculty Chairman Designation
+  type: text
+  required: true
+  never_ai: false
+  masked: false
+  section: Indenter Details
+- key: department
+  label: Department
+  type: text
+  required: true
+  never_ai: false
+  masked: false
+  section: Indenter Details

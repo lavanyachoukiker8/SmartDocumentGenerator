@@ -1,4 +1,11 @@
 placeholders:
+- key: letter_date
+  label: Date of Summary
+  type: date
+  required: true
+  never_ai: false
+  masked: false
+  section: General
 - key: event_title
   label: Event Title
   type: text
@@ -6,36 +13,105 @@ placeholders:
   never_ai: false
   masked: false
   shared: true
-  question: Event title
-  section: Event Details
-- key: summary_date
-  label: Summary Date
-  type: date
-  required: true
-  never_ai: false
-  masked: false
-  question: Date of summary sheet
-  section: Header
+  section: General
 - key: reimbursements
-  label: Reimbursements Table
+  label: Reimbursement Items
   type: table
   required: true
-  never_ai: false
+  never_ai: true
   masked: false
-  question: Recipient names, bank details, and reimbursement amounts
-  section: Distribution
+  section: Reimbursements
   columns:
+  - key: sr_no
+    label: Sr No.
+    type: number
   - key: name
-    label: Team / Entity
+    label: Payee Name
+    type: text
+  - key: account_details
+    label: Account Details
     type: text
   - key: paid_to
-    label: Paid To
+    label: To Be Paid To
     type: text
-  - key: account
-    label: Account
-    type: text
-    never_ai: true
-    masked: true
-  - key: amount
-    label: Amount
+  - key: prize_money
+    label: Prize Money (INR)
     type: number
+  - key: other
+    label: Other Expenses (INR)
+    type: number
+  - key: total
+    label: Total Amount (INR)
+    type: number
+- key: total_prizes
+  label: Total Prize Money (INR)
+  type: number
+  required: false
+  never_ai: true
+  masked: false
+  section: Reimbursements
+- key: total_other
+  label: Total Other Expenses (INR)
+  type: number
+  required: false
+  never_ai: true
+  masked: false
+  section: Reimbursements
+- key: grand_total
+  label: Grand Total (INR)
+  type: number
+  required: false
+  never_ai: true
+  masked: false
+  section: Reimbursements
+- key: other_accounts
+  label: Other Bank Accounts
+  type: table
+  required: false
+  never_ai: true
+  masked: false
+  section: Other Accounts
+  columns:
+  - key: sr_no
+    label: Sr No.
+    type: number
+  - key: name
+    label: Account Name
+    type: text
+  - key: account_no
+    label: Account Number
+    type: text
+  - key: ifsc
+    label: IFSC Code
+    type: text
+  - key: amount
+    label: Amount (INR)
+    type: number
+- key: other_accounts_total
+  label: Other Accounts Total (INR)
+  type: number
+  required: false
+  never_ai: true
+  masked: false
+  section: Other Accounts
+- key: student_chairperson_name
+  label: Student Head Name
+  type: text
+  required: true
+  never_ai: false
+  masked: false
+  section: Signatories
+- key: student_secretary_name
+  label: Student Secretary Name
+  type: text
+  required: true
+  never_ai: false
+  masked: false
+  section: Signatories
+- key: faculty_chairman_name
+  label: Faculty Chairman Name
+  type: text
+  required: true
+  never_ai: false
+  masked: false
+  section: Signatories

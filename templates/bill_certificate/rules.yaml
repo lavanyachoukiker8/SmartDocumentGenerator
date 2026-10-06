@@ -1,5 +1,5 @@
 rules:
-- id: rule-expenses-needed
-  description: Recommended when events involve purchases, refreshments, printing,
-    or external vendors.
+- id: bill-expenses
+  description: Recommended whenever equipment, refreshments, printing, or club items
+    are purchased.
   condition: hasExpenses == True

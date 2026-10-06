@@ -86,7 +86,7 @@ class Placeholder(CamelModel):
     label: str
     type: FieldType
     required: bool
-    question: str
+    question: Optional[str] = None
     never_ai: bool = False
     masked: bool = False
     sensitive: Optional[bool] = False

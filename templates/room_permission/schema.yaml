@@ -3,153 +3,255 @@ placeholders:
   label: Reference Number
   type: text
   required: true
+  question: What is the dispatch reference number?
   never_ai: true
   masked: false
-  question: Official reference number for room booking
-  section: Header
+  shared: false
+  section: Administrative
 - key: letter_date
-  label: Letter Date
+  label: Date of Letter
   type: date
   required: true
+  question: What is the date of the letter?
   never_ai: false
   masked: false
-  question: Date of this letter
-  section: Header
+  shared: false
+  section: Administrative
 - key: submitted_to
   label: Submitted To
   type: text
   required: true
+  question: To whom is this request submitted?
   never_ai: false
   masked: false
-  question: Authority addressed
-  section: Header
+  shared: false
+  section: General
+- key: subject
+  label: Subject
+  type: text
+  required: true
+  question: What is the subject line?
+  never_ai: false
+  masked: false
+  ai_draftable: true
+  shared: false
+  section: General
 - key: event_title
   label: Event Title
   type: text
   required: true
-  never_ai: false
-  masked: false
-  shared: true
   question: What is the event title?
-  section: Event Details
-- key: start_date
-  label: Start Date
-  type: date
-  required: true
   never_ai: false
   masked: false
   shared: true
-  question: When does the event start?
-  section: Event Details
-- key: end_date
-  label: End Date
-  type: date
-  required: false
-  never_ai: false
-  masked: false
-  shared: true
-  question: When does the event end?
   section: Event Details
 - key: venue
   label: Venue / Room
   type: text
   required: true
-  never_ai: false
-  masked: false
-  shared: true
   question: Which room or seminar hall is requested?
-  section: Event Details
-- key: mode
-  label: Event Mode
-  type: text
-  required: false
   never_ai: false
   masked: false
   shared: true
-  question: Offline, Online, or Hybrid?
+  section: Event Details
+- key: start_date
+  label: Start Date
+  type: date
+  required: true
+  question: What is the event start date?
+  never_ai: false
+  masked: false
+  shared: true
+  section: Schedule
+- key: end_date
+  label: End Date
+  type: date
+  required: true
+  question: What is the event end date?
+  never_ai: false
+  masked: false
+  shared: true
+  section: Schedule
+- key: time_from
+  label: Start Time
+  type: text
+  required: true
+  question: What time does the event begin?
+  never_ai: false
+  masked: false
+  shared: true
+  section: Schedule
+- key: time_to
+  label: End Time
+  type: text
+  required: true
+  question: What time does the event end?
+  never_ai: false
+  masked: false
+  shared: true
+  section: Schedule
+- key: description
+  label: Brief Description
+  type: longtext
+  required: true
+  question: Provide a brief description of the event.
+  never_ai: false
+  masked: false
+  ai_draftable: true
+  shared: false
+  section: Event Details
+- key: objective
+  label: Objective
+  type: longtext
+  required: true
+  question: What is the primary objective of this event?
+  never_ai: false
+  masked: false
+  ai_draftable: true
+  shared: false
   section: Event Details
 - key: participants
   label: Expected Participants
   type: text
-  required: false
+  required: true
+  question: How many participants are expected?
   never_ai: false
   masked: false
   shared: true
-  question: Expected attendance count
+  section: Event Details
+- key: mode
+  label: Mode of Event
+  type: select
+  required: true
+  question: Is the event offline, online, or hybrid?
+  options:
+  - Offline
+  - Online
+  - Hybrid
+  never_ai: false
+  masked: false
+  shared: true
+  section: Event Details
+- key: organizers
+  label: Event Organizers
+  type: text
+  required: true
+  question: Who is organizing this event?
+  never_ai: false
+  masked: false
+  shared: true
   section: Event Details
 - key: faculty_coordinator
   label: Faculty Coordinator
   type: text
   required: true
+  question: Who is the faculty coordinator?
   never_ai: false
   masked: false
   shared: true
-  question: Who is the faculty coordinator?
-  section: Event Details
-- key: subject
-  label: Subject Line
+  section: Signatories
+- key: contact_1_name
+  label: Student Head Name
   type: text
   required: true
   never_ai: false
   masked: false
-  question: Subject of the permission letter
-  section: Letter Content
-- key: description
-  label: Event Description
-  type: longtext
-  required: false
-  never_ai: false
-  masked: false
-  ai_draftable: true
-  question: Brief overview of activities
-  section: Letter Content
-- key: objective
-  label: Event Objective
-  type: longtext
-  required: false
-  never_ai: false
-  masked: false
-  ai_draftable: true
-  question: Learning outcomes or goal
-  section: Letter Content
-- key: schedule
-  label: Schedule
-  type: table
-  required: false
-  never_ai: false
-  masked: false
-  question: Day-by-day session schedule
-  section: Schedule
-  columns:
-  - key: date
-    label: Date
-    type: text
-  - key: time
-    label: Time
-    type: text
-  - key: session
-    label: Session
-    type: text
-- key: contacts
-  label: Contact Persons
-  type: table
-  required: false
-  never_ai: false
-  masked: false
-  question: Student and faculty contact details
   section: Contacts
-  columns:
-  - key: name
-    label: Name
-    type: text
-  - key: designation
-    label: Designation
-    type: text
-  - key: branch
-    label: Branch
-    type: text
-  - key: mobile
-    label: Mobile
-    type: text
-    never_ai: true
-    masked: true
+- key: contact_1_designation
+  label: Student Head Designation
+  type: text
+  required: true
+  never_ai: false
+  masked: false
+  section: Contacts
+- key: contact_1_admn
+  label: Student Head Admission No.
+  type: text
+  required: false
+  never_ai: false
+  masked: false
+  section: Contacts
+- key: contact_1_branch
+  label: Student Head Branch
+  type: text
+  required: false
+  never_ai: false
+  masked: false
+  section: Contacts
+- key: contact_1_mobile
+  label: Student Head Mobile No.
+  type: text
+  required: false
+  never_ai: true
+  masked: true
+  section: Contacts
+- key: contact_2_name
+  label: Tech Assistant Name
+  type: text
+  required: true
+  never_ai: false
+  masked: false
+  section: Contacts
+- key: contact_2_designation
+  label: Tech Assistant Designation
+  type: text
+  required: true
+  never_ai: false
+  masked: false
+  section: Contacts
+- key: contact_2_branch
+  label: Tech Assistant Branch
+  type: text
+  required: false
+  never_ai: false
+  masked: false
+  section: Contacts
+- key: contact_2_mobile
+  label: Tech Assistant Mobile No.
+  type: text
+  required: false
+  never_ai: true
+  masked: true
+  section: Contacts
+- key: contact_3_name
+  label: Faculty In-charge Name
+  type: text
+  required: true
+  never_ai: false
+  masked: false
+  section: Contacts
+- key: contact_3_designation
+  label: Faculty In-charge Designation
+  type: text
+  required: true
+  never_ai: false
+  masked: false
+  section: Contacts
+- key: contact_3_branch
+  label: Faculty In-charge Branch
+  type: text
+  required: false
+  never_ai: false
+  masked: false
+  section: Contacts
+- key: contact_4_name
+  label: Faculty Chairman Name
+  type: text
+  required: true
+  never_ai: false
+  masked: false
+  section: Contacts
+- key: contact_4_designation
+  label: Faculty Chairman Designation
+  type: text
+  required: true
+  never_ai: false
+  masked: false
+  section: Contacts
+- key: contact_4_branch
+  label: Faculty Chairman Branch
+  type: text
+  required: false
+  never_ai: false
+  masked: false
+  section: Contacts
